@@ -18,6 +18,7 @@ st.set_page_config(page_title="OPI Master Portal", layout="wide")
 # --- 2. HELPERS ---
 def clean_pdf_text(text):
     if not text: return ""
+    # Safe replacement for non-latin characters
     return str(text).replace("₹", "Rs. ").encode('ascii', 'ignore').decode('ascii')
 
 # --- 3. DOCUMENT GENERATORS ---
@@ -25,37 +26,54 @@ def clean_pdf_text(text):
 def create_admit_card(student, exam):
     pdf = FPDF(orientation='P', unit='mm', format='A4')
     pdf.add_page()
-    pdf.set_draw_color(0, 51, 102); pdf.rect(10, 10, 190, 130) 
-    pdf.set_fill_color(0, 51, 102); pdf.rect(10, 10, 190, 25, 'F')
-    if os.path.exists("logo.png"): pdf.image("logo.png", x=13, y=12, h=20)
-    pdf.set_text_color(255, 255, 255); pdf.set_font("Arial", 'B', 16)
-    pdf.set_xy(40, 14); pdf.cell(0, 8, "OXFORD PARAMEDICAL INSTITUTE")
-    pdf.set_font("Arial", 'B', 10); pdf.set_xy(40, 22); pdf.cell(0, 5, "EXAMINATION ADMIT CARD")
     
+    # Branded Frame
+    pdf.set_draw_color(0, 51, 102); pdf.rect(10, 10, 190, 140) 
+    pdf.set_fill_color(0, 51, 102); pdf.rect(10, 10, 190, 25, 'F')
+    
+    if os.path.exists("logo.png"): pdf.image("logo.png", x=13, y=12, h=20)
+    
+    pdf.set_text_color(255, 255, 255); pdf.set_font("Arial", 'B', 15)
+    pdf.set_xy(40, 13); pdf.cell(0, 8, "OXFORD PARAMEDICAL INSTITUTE")
+    pdf.set_font("Arial", 'B', 10); pdf.set_xy(40, 21); pdf.cell(0, 5, "OFFICIAL EXAMINATION ADMIT CARD")
+    
+    # Candidate Data
     pdf.set_text_color(0, 0, 0); pdf.set_font("Arial", 'B', 11)
-    pdf.set_xy(15, 40); pdf.cell(0, 8, f"EXAM: {exam['exam_name'].upper()}")
+    pdf.set_xy(15, 42); pdf.cell(0, 8, f"EXAM: {clean_pdf_text(exam['exam_name']).upper()}")
     
     photo_data = student.get('photo_url', "")
     if photo_data and "base64," in str(photo_data):
-        try: pdf.image(BytesIO(base64.b64decode(photo_data.split(",")[1])), x=155, y=40, w=35, h=40)
-        except: pdf.rect(155, 40, 35, 40)
-    
+        try: pdf.image(BytesIO(base64.b64decode(photo_data.split(",")[1])), x=155, y=42, w=35, h=40)
+        except: pdf.rect(155, 42, 35, 40)
+    else: pdf.rect(155, 42, 35, 40)
+
     pdf.set_font("Arial", '', 11)
-    pdf.set_xy(15, 50); pdf.cell(0, 8, f"Name: {student['name']}")
-    pdf.set_xy(15, 57); pdf.cell(0, 8, f"Roll No: {student['roll_no']}")
-    pdf.set_xy(15, 64); pdf.cell(0, 8, f"Course: {student['course']}")
+    pdf.set_xy(15, 52); pdf.cell(0, 8, f"Candidate: {clean_pdf_text(student['name'])}")
+    pdf.set_xy(15, 59); pdf.cell(0, 8, f"Roll No: {student['roll_no']}")
+    pdf.set_xy(15, 66); pdf.cell(0, 8, f"Course: {student['course']}")
     
-    pdf.set_xy(15, 80); pdf.set_font("Arial", 'B', 10); pdf.set_fill_color(230, 230, 230)
-    pdf.cell(90, 8, "Subject Name", border=1, fill=True); pdf.cell(40, 8, "Exam Date", border=1, fill=True, ln=True)
+    # 📚 SUBJECT SCHEDULE TABLE
+    pdf.set_xy(15, 82); pdf.set_font("Arial", 'B', 10); pdf.set_fill_color(230, 230, 230)
+    pdf.cell(100, 8, "Subject Name", border=1, fill=True, align='C')
+    pdf.cell(40, 8, "Exam Date", border=1, fill=True, align='C', ln=True)
+    
     pdf.set_font("Arial", '', 10)
-    for line in exam['subject_details'].split("\n"):
+    # Parsing the list: Each line should be "Subject: Date"
+    raw_subjects = exam.get('subject_details', "")
+    for line in raw_subjects.split("\n"):
         if ":" in line:
-            subj, dt = line.split(":", 1)
-            pdf.set_x(15); pdf.cell(90, 8, subj.strip(), border=1); pdf.cell(40, 8, dt.strip(), border=1, ln=True)
+            parts = line.split(":", 1)
+            pdf.set_x(15)
+            pdf.cell(100, 8, clean_pdf_text(parts[0].strip()), border=1)
+            pdf.cell(40, 8, clean_pdf_text(parts[1].strip()), border=1, align='C', ln=True)
             
-    pdf.set_xy(15, 115); pdf.set_font("Arial", 'I', 9); pdf.cell(0, 5, f"Reporting Time: {exam['reporting_time']} | Venue: {exam['venue']}")
-    if os.path.exists("signature.png"): pdf.image("signature.png", x=155, y=115, h=15)
-    pdf.set_xy(155, 130); pdf.set_font("Arial", 'B', 8); pdf.cell(35, 5, "Controller of Exams", border='T', align='C')
+    # Exam Instructions
+    pdf.set_xy(15, 125); pdf.set_font("Arial", 'I', 9)
+    pdf.cell(0, 5, f"Reporting Time: {clean_pdf_text(exam['reporting_time'])} | Venue: {clean_pdf_text(exam['venue'])}")
+    
+    if os.path.exists("signature.png"): pdf.image("signature.png", x=155, y=125, h=15)
+    pdf.set_xy(155, 142); pdf.set_font("Arial", 'B', 8); pdf.cell(35, 5, "Controller of Exams", border='T', align='C')
+    
     return pdf.output(dest='S').encode('latin-1', 'replace')
 
 def create_id_card(student):
@@ -92,9 +110,9 @@ def create_fee_receipt(student_name, roll_no, payment):
     pdf.set_xy(140, 140); pdf.set_font("Arial", 'B', 10); pdf.cell(50, 5, "Authorized Signatory", border='T', align='C')
     return pdf.output(dest='S').encode('latin-1', 'replace')
 
-# --- 4. APP LOGIC ---
+# --- 4. APP AUTH ---
 if 'auth' not in st.session_state:
-    st.session_state.update({'auth': False, 'role': None, 'user': None})
+    st.session_state.update({'auth': False, 'role': None, 'user': None, 'edit_id': None})
 
 if not st.session_state.auth:
     st.title("🔐 OPI Master Portal")
@@ -106,7 +124,7 @@ if not st.session_state.auth:
             res = supabase.table("students").select("*").eq("roll_no", u).eq("password", p).execute()
             if res.data:
                 st.session_state.update({'auth': True, 'role': 'Student', 'user': res.data[0]}); st.rerun()
-            else: st.error("Access Denied")
+            else: st.error("Login Failed")
 else:
     if st.sidebar.button("Logout"):
         for k in list(st.session_state.keys()): del st.session_state[k]
@@ -114,60 +132,83 @@ else:
 
     if st.session_state.role == "Admin":
         st.title("👨‍🏫 OPI Admin Control")
-        t1, t2, t3, t4 = st.tabs(["Enroll Student", "Fee Collection", "Exam Schedules", "Student Clearance"])
+        t1, t2, t3, t4 = st.tabs(["Enroll", "Fees", "Exams", "Clearance & Edit"])
         
-        with t1:
-            with st.form("enroll", clear_on_submit=True):
+        with t1: # ENROLLMENT
+            with st.form("enroll_f", clear_on_submit=True):
                 c1, c2 = st.columns(2)
-                r, n, crs = c1.text_input("Roll No"), c1.text_input("Name"), c1.selectbox("Course", ["DMLT", "Radiology", "ECG Technician", "Nursing Assistant"])
+                r, n, crs = c1.text_input("Roll No"), c1.text_input("Name"), c1.selectbox("Course", ["DMLT", "Radiology", "ECG", "Nursing"])
                 ph, m_fee, p_set = c1.text_input("WhatsApp"), c2.number_input("Monthly Fee", value=2500), c2.text_input("Password")
-                j_date, addr = c2.date_input("Joining Date"), st.text_area("Address")
+                j_dt, addr = c2.date_input("Joining Date"), st.text_area("Address")
                 up = st.file_uploader("Photo", type=['jpg', 'png'])
-                if st.form_submit_button("Save"):
+                if st.form_submit_button("Save Student"):
                     img = f"data:image/png;base64,{base64.b64encode(up.getvalue()).decode()}" if up else ""
-                    supabase.table("students").insert({"roll_no": r, "name": n, "course": crs, "password": p_set, "photo_url": img, "is_active": True, "monthly_fee_amount": m_fee, "address": addr, "phone": ph, "joining_date": str(j_date), "exam_cleared": False}).execute()
-                    st.success("Enrolled!")
+                    supabase.table("students").insert({"roll_no": r, "name": n, "course": crs, "password": p_set, "photo_url": img, "is_active": True, "monthly_fee_amount": m_fee, "address": addr, "phone": ph, "joining_date": str(j_dt), "exam_cleared": False}).execute()
+                    st.success("Enrolled!"); st.rerun()
 
-        with t2:
+        with t2: # FEES
             students = supabase.table("students").select("*").eq("is_active", True).execute().data
             if students:
                 s_dict = {f"{s['name']} (ID: {s['roll_no']})": s for s in students}
                 sel_s = s_dict[st.selectbox("Select Student", list(s_dict.keys()), key="fee_sel")]
-                f_cat = st.selectbox("Type", ["Monthly Tuition", "Admission Fee", "Registration Fee", "Examination Fee"])
+                f_cat = st.selectbox("Type", ["Monthly Tuition", "Admission Fee", "Exam Fee"])
                 c_a, c_b = st.columns(2)
-                base_amt = c_a.number_input("Base Amount", value=int(sel_s.get('monthly_fee_amount', 2500)) if f_cat == "Monthly Tuition" else 0)
-                f_desc, mode = c_b.text_input("Details"), c_b.selectbox("Mode", ["Cash", "UPI"])
-                if st.button("Process Payment"):
+                base = c_a.number_input("Amount", value=int(sel_s.get('monthly_fee_amount', 2500)) if f_cat == "Monthly Tuition" else 0)
+                f_notes, mode = c_b.text_input("Notes"), c_b.selectbox("Mode", ["Cash", "UPI"])
+                if st.button("Generate Receipt"):
                     r_id = f"OPI-{datetime.datetime.now().strftime('%y%m%d%H%M%S')}"
-                    p_data = {"roll_no": sel_s['roll_no'], "student_name": sel_s['name'], "amount_paid": base_amt, "fee_type": f"{f_cat} ({f_desc})", "receipt_no": r_id, "payment_date": str(datetime.date.today()), "payment_mode": mode}
+                    p_data = {"roll_no": sel_s['roll_no'], "student_name": sel_s['name'], "amount_paid": base, "fee_type": f"{f_cat} ({f_notes})", "receipt_no": r_id, "payment_date": str(datetime.date.today()), "payment_mode": mode}
                     supabase.table("fee_records").insert(p_data).execute()
-                    st.download_button("📩 Receipt PDF", create_fee_receipt(sel_s['name'], sel_s['roll_no'], p_data), f"Rec_{r_id}.pdf")
+                    st.download_button("📩 Download PDF", create_fee_receipt(sel_s['name'], sel_s['roll_no'], p_data), f"Rec_{r_id}.pdf")
 
-        with t3:
-            st.subheader("📅 Manage Exam Schedules")
-            with st.form("exam_form"):
-                e_crs = st.selectbox("Course", ["DMLT", "Radiology", "ECG Technician", "Nursing Assistant"])
-                e_nm = st.text_input("Exam Name")
-                e_subs = st.text_area("Subjects (Format: Anatomy: 20-05-2026)")
+        with t3: # EXAMS
+            st.subheader("📅 Schedule New Examination")
+            with st.form("exam_publish"):
+                e_crs = st.selectbox("Course", ["DMLT", "Radiology", "ECG", "Nursing"])
+                e_nm = st.text_input("Exam Name", placeholder="e.g. DMLT First Year Exam")
+                st.write("📖 Enter Subjects and Dates (Format: Subject: Date)")
+                e_subs = st.text_area("Schedule", placeholder="Anatomy: 20/05/2026\nPhysiology: 22/05/2026")
                 e_tm = st.text_input("Reporting Time", value="09:30 AM")
                 e_vn = st.text_input("Venue", value="OPI Campus")
-                if st.form_submit_button("Publish"):
+                if st.form_submit_button("Publish Schedules"):
                     supabase.table("exam_schedules").insert({"course": e_crs, "exam_name": e_nm, "subject_details": e_subs, "reporting_time": e_tm, "venue": e_vn}).execute()
-                    st.success("Exam Published!")
+                    st.success("Exam Schedule Published!")
             st.dataframe(supabase.table("exam_schedules").select("*").execute().data)
 
-        with t4:
-            st.subheader("🔑 Manual Exam Clearance")
+        with t4: # CLEARANCE & EDITING
+            st.subheader("📋 Student Management")
             recs = supabase.table("students").select("*").execute().data
+            
+            # --- Inline Edit Form ---
+            if st.session_state.edit_id:
+                target = next((s for s in recs if str(s['roll_no']) == str(st.session_state.edit_id)), None)
+                if target:
+                    st.warning(f"Editing: {target['name']}")
+                    with st.form("edit_stu"):
+                        en = st.text_input("Name", value=target['name'])
+                        ec = st.selectbox("Course", ["DMLT", "Radiology", "ECG", "Nursing"], index=["DMLT", "Radiology", "ECG", "Nursing"].index(target['course']))
+                        if st.form_submit_button("Update Data"):
+                            supabase.table("students").update({"name": en, "course": ec}).eq("roll_no", target['roll_no']).execute()
+                            st.session_state.edit_id = None; st.rerun()
+                    if st.button("Cancel"): st.session_state.edit_id = None; st.rerun()
+            
+            # --- The List ---
             for row in recs:
-                c1, c2, c3 = st.columns([3, 1, 1])
-                c1.write(f"**{row['name']}** ({row['roll_no']}) - {row['course']}")
-                status = "✅ CLEARED" if row['exam_cleared'] else "❌ LOCKED"
-                c2.write(f"Status: {status}")
-                label = "Lock Admit Card" if row['exam_cleared'] else "Give Admit Card Access"
-                if c3.button(label, key=f"clr_{row['roll_no']}"):
+                c1, c2, c3, c4 = st.columns([3, 1, 1, 1])
+                c1.write(f"**{row['name']}** ({row['roll_no']})")
+                
+                # Clearance Toggle
+                clr_label = "✅ Shared" if row['exam_cleared'] else "❌ Locked"
+                if c2.button(clr_label, key=f"clr_{row['roll_no']}"):
                     supabase.table("students").update({"exam_cleared": not row['exam_cleared']}).eq("roll_no", row['roll_no']).execute()
                     st.rerun()
+                
+                if c3.button("Edit ✏️", key=f"ed_{row['roll_no']}"):
+                    st.session_state.edit_id = row['roll_no']; st.rerun()
+                
+                if c4.button("Delete 🗑️", key=f"dl_{row['roll_no']}"):
+                    supabase.table("fee_records").delete().eq("roll_no", row['roll_no']).execute()
+                    supabase.table("students").delete().eq("roll_no", row['roll_no']).execute(); st.rerun()
 
     elif st.session_state.role == "Student":
         s = st.session_state.user
@@ -177,16 +218,16 @@ else:
             if s.get('photo_url'): st.image(s['photo_url'], width=150)
             st.download_button("🪪 ID Card", create_id_card(s), f"ID_{s['roll_no']}.pdf")
             
-            # --- ADMIT CARD SECTION ---
+            # --- ADMIT CARD LOGIC ---
             st.divider()
-            exams = supabase.table("exam_schedules").select("*").eq("course", s['course']).execute().data
+            exams = supabase.table("exam_schedules").select("*").eq("course", s['course']).order('id', desc=True).execute().data
             if exams:
-                latest = exams[-1]
+                latest = exams[0]
                 if s.get('exam_cleared', False):
-                    st.success("✅ Your Admit Card is ready!")
+                    st.success(f"Exam: {latest['exam_name']}")
                     st.download_button("📄 Download Admit Card", create_admit_card(s, latest), f"Admit_{s['roll_no']}.pdf")
                 else:
-                    st.error("🔒 Admit Card not shared yet. Please contact OPI Office.")
+                    st.error("🔒 Admit Card Locked. Contact Office.")
             else:
                 st.write("No exams scheduled.")
 
@@ -196,4 +237,4 @@ else:
             if h:
                 for p in h:
                     st.write(f"**{p['fee_type']}** | Rs. {p['amount_paid']}")
-                    st.download_button(f"📄 Rec {p['receipt_no']}", create_fee_receipt(s['name'], s['roll_no'], p), f"OPI_{p['receipt_no']}.pdf", key=f"dl_{p['receipt_no']}")
+                    st.download_button(f"📄 Rec {p['receipt_no']}", create_fee_receipt(s['name'], s['roll_no'], p), f"OPI_{p['receipt_no']}.pdf", key=f"st_dl_{p['receipt_no']}")

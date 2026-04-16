@@ -18,21 +18,21 @@ def create_id_card(student):
     pdf = FPDF(orientation='P', unit='mm', format='A4')
     pdf.add_page()
     
-    ox, oy = 10, 10 # Top-left position
+    ox, oy = 10, 10 # Position on the A4 page
     cw, ch = 85, 55 # ID Card size
     
-    # Border & Header
-    pdf.set_draw_color(0, 51, 102) # OPI Navy Blue
+    # Border & Navy Blue Header
+    pdf.set_draw_color(0, 51, 102)
     pdf.set_line_width(0.5)
     pdf.rect(ox, oy, cw, ch)
     pdf.set_fill_color(0, 51, 102)
     pdf.rect(ox, oy, cw, 12, 'F')
     
-    # LOGO (Top Left)
+    # 🏛️ LOGO (Top Left)
     if os.path.exists("logo.png"):
         pdf.image("logo.png", x=ox + 2, y=oy + 1.5, h=9)
     
-    # Header Text
+    # 🏛️ HEADER TEXT
     pdf.set_text_color(255, 255, 255)
     pdf.set_font("Arial", 'B', 9)
     pdf.set_xy(ox + 12, oy + 2)
@@ -41,14 +41,15 @@ def create_id_card(student):
     pdf.set_xy(ox + 12, oy + 7)
     pdf.cell(cw - 12, 3, "GUWAHATI | DHUPDHARA, ASSAM", ln=True, align='L')
     
-    # PHOTO PROCESSING
-    photo_data = student.get('photo_url')
-    if photo_data and "base64," in photo_data:
+    # 📸 PHOTO PROCESSING
+    # Uses .get() to prevent crashes if the column is missing
+    photo_data = student.get('photo_url', "")
+    if photo_data and "base64," in str(photo_data):
         try:
             header, encoded = photo_data.split(",", 1)
             img_bytes = base64.b64decode(encoded)
             img = Image.open(BytesIO(img_bytes))
-            temp_path = f"temp_{student['roll_no']}.png"
+            temp_path = f"temp_{student.get('roll_no', 'user')}.png"
             img.save(temp_path)
             pdf.image(temp_path, x=ox + 62, y=oy + 15, w=18, h=22)
         except:
@@ -57,28 +58,33 @@ def create_id_card(student):
         pdf.set_draw_color(200, 200, 200)
         pdf.rect(ox + 62, oy + 15, 18, 22)
 
-    # DETAILS
+    # 📝 STUDENT DETAILS
     pdf.set_text_color(0, 0, 0)
     def add_line(label, value, y_add):
         pdf.set_xy(ox + 4, oy + y_add)
         pdf.set_font("Arial", 'B', 8)
         pdf.cell(18, 5, label)
         pdf.set_font("Arial", '', 8)
-        pdf.cell(40, 5, str(value).upper(), ln=True)
+        # Handle None values safely
+        val_str = str(value) if value else "N/A"
+        pdf.cell(40, 5, val_str.upper(), ln=True)
 
-    add_line("NAME:", student.get('name', 'N/A'), 18)
-    add_line("ROLL NO:", student.get('roll_no', 'N/A'), 24)
-    add_line("COURSE:", student.get('course', 'N/A'), 30)
-    add_line("SESSION:", student.get('session', 'N/A'), 36)
-    add_line("B. GROUP:", student.get('blood_group', 'N/A'), 42)
+    add_line("NAME:", student.get('name'), 18)
+    add_line("ROLL NO:", student.get('roll_no'), 24)
+    add_line("COURSE:", student.get('course'), 30)
+    add_line("SESSION:", student.get('session'), 36)
+    add_line("B. GROUP:", student.get('blood_group'), 42)
     
-    # ADDRESS
+    # 📍 ADDRESS (The Error Fix)
     pdf.set_xy(ox + 4, oy + 47)
     pdf.set_font("Arial", 'B', 7)
     pdf.cell(18, 4, "ADDRESS:", 0)
     pdf.set_font("Arial", '', 6)
     pdf.set_xy(ox + 22, oy + 47)
-    pdf.multi_cell(40, 3, student.get('address', 'N/A'))
+    # Safely get address or show N/A
+    addr = student.get('address')
+    addr_str = str(addr) if addr else "N/A"
+    pdf.multi_cell(40, 3, addr_str)
 
     return pdf.output(dest='S').encode('latin-1')
 
@@ -99,7 +105,7 @@ if not st.session_state.auth:
             if res.data:
                 st.session_state.update({'auth': True, 'role': 'Student', 'user': res.data[0]})
                 st.rerun()
-            else: st.error("Invalid Login Credentials")
+            else: st.error("Access Denied: Invalid Credentials")
 else:
     if st.sidebar.button("Logout"):
         st.session_state.auth = False
@@ -123,7 +129,7 @@ else:
                     sess = st.text_input("Session")
                     p_set = st.text_input("Set Password")
                 
-                addr = st.text_area("Address")
+                addr_input = st.text_area("Address")
                 up_file = st.file_uploader("Choose Student Photo", type=['jpg', 'png', 'jpeg'])
                 
                 if st.form_submit_button("Save Record"):
@@ -133,7 +139,7 @@ else:
                     
                     payload = {
                         "roll_no": r, "name": n, "course": crs, "phone": ph,
-                        "blood_group": bg, "session": sess, "address": addr,
+                        "blood_group": bg, "session": sess, "address": addr_input,
                         "password": p_set, "photo_url": img_str
                     }
                     supabase.table("students").insert(payload).execute()
@@ -149,24 +155,28 @@ else:
     # --- STUDENT SIDE ---
     elif st.session_state.role == "Student":
         s = st.session_state.user
-        st.title(f"👋 Student Portal: {s['name']}")
+        st.title(f"👋 Student Portal: {s.get('name', 'Student')}")
         
         col_img, col_info = st.columns([1, 2])
         with col_img:
-            if s.get('photo_url') and len(s['photo_url']) > 100:
-                st.image(s['photo_url'], width=180)
-            else: st.info("Photo not available in records.")
+            p_url = s.get('photo_url')
+            if p_url and len(str(p_url)) > 100:
+                st.image(p_url, width=180)
+            else: st.info("Photo not available.")
             
         with col_info:
             st.subheader("Academic Details")
-            st.write(f"**Roll No:** {s['roll_no']}")
-            st.write(f"**Course:** {s['course']}")
+            st.write(f"**Roll No:** {s.get('roll_no')}")
+            st.write(f"**Course:** {s.get('course')}")
             st.write(f"**Address:** {s.get('address', 'N/A')}")
             
-            pdf_bytes = create_id_card(s)
-            st.download_button(
-                label="🪪 Download ID Card (PDF)",
-                data=pdf_bytes,
-                file_name=f"OPI_ID_{s['roll_no']}.pdf",
-                mime="application/pdf"
-            )
+            try:
+                pdf_bytes = create_id_card(s)
+                st.download_button(
+                    label="🪪 Download ID Card (PDF)",
+                    data=pdf_bytes,
+                    file_name=f"OPI_ID_{s.get('roll_no', 'student')}.pdf",
+                    mime="application/pdf"
+                )
+            except Exception as e:
+                st.error(f"Could not generate ID card: {e}")

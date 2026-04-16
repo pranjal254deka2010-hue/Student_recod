@@ -31,10 +31,9 @@ def create_id_card(student):
     
     pdf.set_text_color(255, 255, 255)
     pdf.set_font("Arial", 'B', 9)
-    pdf.set_xy(ox + 12, oy + 2.5)
+    pdf.set_xy(ox + 12, oy + 4) 
     pdf.cell(cw - 12, 4, "OXFORD PARAMEDICAL INSTITUTE", ln=True, align='L')
     
-    # Photo Handling
     photo_data = student.get('photo_url', "")
     if photo_data and "base64," in str(photo_data):
         try:
@@ -57,7 +56,6 @@ def create_id_card(student):
     add_line("SESSION:", student.get('session'), 36)
     add_line("B. GROUP:", student.get('blood_group'), 42)
     
-    # Address Handling
     pdf.set_xy(ox + 4, oy + 47)
     pdf.set_font("Arial", 'B', 7); pdf.cell(18, 4, "ADDRESS:", 0)
     pdf.set_font("Arial", '', 6); pdf.set_xy(ox + 22, oy + 47)
@@ -68,15 +66,12 @@ def create_id_card(student):
 def create_fee_receipt(student_name, roll_no, payment):
     pdf = FPDF(orientation='P', unit='mm', format='A4')
     pdf.add_page()
-    # Institution Header
     pdf.set_fill_color(0, 51, 102); pdf.rect(10, 10, 190, 32, 'F')
     if os.path.exists("logo.png"): pdf.image("logo.png", x=15, y=12, h=28)
-    pdf.set_text_color(255, 255, 255); pdf.set_xy(50, 15); pdf.set_font("Arial", 'B', 16)
+    pdf.set_text_color(255, 255, 255); pdf.set_xy(50, 18); pdf.set_font("Arial", 'B', 18)
     pdf.cell(0, 8, "OXFORD PARAMEDICAL INSTITUTE", ln=True)
-    pdf.set_font("Arial", '', 10); pdf.set_x(50); pdf.cell(0, 5, "Guwahati | Dhupdhara, Assam", ln=True)
-    pdf.set_x(50); pdf.cell(0, 5, "Run by Akankshi Foundation Trust", ln=True)
+    pdf.set_font("Arial", '', 11); pdf.set_x(50); pdf.cell(0, 6, "Guwahati | Dhupdhara, Assam", ln=True)
     
-    # Receipt Body
     pdf.set_text_color(0, 0, 0); pdf.set_xy(10, 50); pdf.set_font("Arial", 'B', 14)
     pdf.cell(0, 10, "OFFICIAL MONEY RECEIPT", ln=True, align='C')
     pdf.set_font("Arial", '', 11)
@@ -95,6 +90,11 @@ def create_fee_receipt(student_name, roll_no, payment):
     pdf.ln(5)
     pdf.set_font("Arial", 'I', 10)
     pdf.cell(0, 10, f"Payment Mode: {payment['payment_mode']}", ln=True)
+    
+    # --- SIGNATURE SECTION ---
+    # Looks for signature.png in the same GitHub folder
+    if os.path.exists("signature.png"):
+        pdf.image("signature.png", x=150, y=105, h=15)
     
     pdf.set_xy(140, 120); pdf.set_font("Arial", 'B', 10)
     pdf.cell(50, 5, "Authorized Signatory", border='T', align='C')

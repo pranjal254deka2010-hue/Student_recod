@@ -5,189 +5,141 @@ import base64
 from io import BytesIO
 from PIL import Image
 import os
+import datetime
 
 # --- 1. DATABASE CONNECTION ---
-# Ensure these secrets are set in your Streamlit Cloud dashboard
 url = st.secrets["SUPABASE_URL"]
 key = st.secrets["SUPABASE_KEY"]
 supabase: Client = create_client(url, key)
 
 st.set_page_config(page_title="OPI Master Portal", layout="wide")
 
-# --- 2. ID CARD GENERATOR (A4 FORMAT) ---
+# --- 2. DOCUMENT GENERATORS (ID CARD & RECEIPT) ---
+
 def create_id_card(student):
-    # Create A4 Portrait PDF
     pdf = FPDF(orientation='P', unit='mm', format='A4')
     pdf.add_page()
-    
-    ox, oy = 10, 10 # Position on the A4 page
-    cw, ch = 85, 55 # Standard ID Card size (85mm x 55mm)
-    
-    # Draw Navy Blue Border
+    ox, oy, cw, ch = 10, 10, 85, 55
     pdf.set_draw_color(0, 51, 102)
-    pdf.set_line_width(0.5)
     pdf.rect(ox, oy, cw, ch)
-    
-    # Draw Header Background
     pdf.set_fill_color(0, 51, 102)
     pdf.rect(ox, oy, cw, 12, 'F')
     
-    # --- LOGO PLACEMENT ---
-    # The code looks for 'logo.png' in your GitHub folder
     if os.path.exists("logo.png"):
         pdf.image("logo.png", x=ox + 2, y=oy + 1.5, h=9)
     
-    # --- HEADER TEXT ---
     pdf.set_text_color(255, 255, 255)
     pdf.set_font("Arial", 'B', 9)
     pdf.set_xy(ox + 12, oy + 2.5)
     pdf.cell(cw - 12, 4, "OXFORD PARAMEDICAL INSTITUTE", ln=True, align='L')
-    pdf.set_font("Arial", '', 6)
-    pdf.set_xy(ox + 12, oy + 7)
-    pdf.cell(cw - 12, 3, "GUWAHATI | DHUPDHARA, ASSAM", ln=True, align='L')
     
-    # --- PHOTO PROCESSING ---
+    # Photo
     photo_data = student.get('photo_url', "")
     if photo_data and "base64," in str(photo_data):
         try:
             header, encoded = photo_data.split(",", 1)
             img_bytes = base64.b64decode(encoded)
-            img = Image.open(BytesIO(img_bytes))
-            temp_path = f"temp_{student.get('roll_no', 'user')}.png"
-            img.save(temp_path)
-            # Position Photo on the Right
-            pdf.image(temp_path, x=ox + 62, y=oy + 15, w=18, h=22)
-        except:
-            pdf.set_draw_color(200, 200, 200)
-            pdf.rect(ox + 62, oy + 15, 18, 22) # Grey box if error
-    else:
-        pdf.set_draw_color(200, 200, 200)
-        pdf.rect(ox + 62, oy + 15, 18, 22)
-
-    # --- STUDENT DETAILS ---
+            pdf.image(BytesIO(img_bytes), x=ox + 62, y=oy + 15, w=18, h=22)
+        except: pdf.rect(ox + 62, oy + 15, 18, 22)
+    
     pdf.set_text_color(0, 0, 0)
+    pdf.set_font("Arial", 'B', 8)
+    fields = [("NAME:", student.get('name')), ("ROLL NO:", student.get('roll_no')), ("COURSE:", student.get('course')), ("SESSION:", student.get('session'))]
+    y = oy + 18
+    for lbl, val in fields:
+        pdf.set_xy(ox + 4, y)
+        pdf.cell(18, 5, lbl); pdf.set_font("Arial", '', 8)
+        pdf.cell(40, 5, str(val).upper(), ln=True); y += 6; pdf.set_font("Arial", 'B', 8)
     
-    def add_line(label, value, y_add):
-        pdf.set_xy(ox + 4, oy + y_add)
-        pdf.set_font("Arial", 'B', 8)
-        pdf.cell(18, 5, label)
-        pdf.set_font("Arial", '', 8)
-        val_str = str(value) if value else "N/A"
-        pdf.cell(40, 5, val_str.upper(), ln=True)
-
-    add_line("NAME:", student.get('name'), 18)
-    add_line("ROLL NO:", student.get('roll_no'), 24)
-    add_line("COURSE:", student.get('course'), 30)
-    add_line("SESSION:", student.get('session'), 36)
-    add_line("B. GROUP:", student.get('blood_group'), 42)
-    
-    # --- ADDRESS (Multi-line support) ---
-    pdf.set_xy(ox + 4, oy + 47)
-    pdf.set_font("Arial", 'B', 7)
-    pdf.cell(18, 4, "ADDRESS:", 0)
-    pdf.set_font("Arial", '', 6)
-    pdf.set_xy(ox + 22, oy + 47)
-    
-    addr = student.get('address')
-    addr_str = str(addr) if addr else "N/A"
-    # multi_cell wraps the address text inside the card width
-    pdf.multi_cell(40, 3, addr_str)
-
     return pdf.output(dest='S').encode('latin-1')
 
-# --- 3. LOGIN & AUTHENTICATION ---
+def create_fee_receipt(student_name, roll_no, payment):
+    pdf = FPDF(orientation='P', unit='mm', format='A4')
+    pdf.add_page()
+    pdf.set_fill_color(0, 51, 102); pdf.rect(10, 10, 190, 30, 'F')
+    if os.path.exists("logo.png"): pdf.image("logo.png", x=15, y=12, h=25)
+    pdf.set_text_color(255, 255, 255); pdf.set_xy(45, 15); pdf.set_font("Arial", 'B', 16)
+    pdf.cell(0, 8, "OXFORD PARAMEDICAL INSTITUTE", ln=True)
+    pdf.set_font("Arial", '', 10); pdf.set_x(45); pdf.cell(0, 5, "Guwahati | Dhupdhara, Assam", ln=True)
+    
+    pdf.set_text_color(0, 0, 0); pdf.set_xy(10, 45); pdf.set_font("Arial", 'B', 12)
+    pdf.cell(0, 10, f"MONEY RECEIPT - {payment['fee_type'].upper()}", ln=True, align='C')
+    pdf.set_font("Arial", '', 11); pdf.cell(95, 8, f"Receipt: {payment['receipt_no']}")
+    pdf.cell(95, 8, f"Date: {payment['payment_date']}", ln=True, align='R')
+    
+    pdf.set_fill_color(240, 240, 240); pdf.set_font("Arial", 'B', 10)
+    pdf.cell(130, 10, "Description", border=1, fill=True)
+    pdf.cell(60, 10, "Amount (INR)", border=1, fill=True, align='C', ln=True)
+    pdf.set_font("Arial", '', 10)
+    pdf.cell(130, 15, f"Fee payment for {student_name} (Roll: {roll_no})", border=1)
+    pdf.cell(60, 15, f"{payment['amount_paid']}/-", border=1, align='C', ln=True)
+    return pdf.output(dest='S').encode('latin-1')
+
+# --- 3. AUTHENTICATION ---
 if 'auth' not in st.session_state:
     st.session_state.update({'auth': False, 'role': None, 'user': None})
 
 if not st.session_state.auth:
-    st.title("🔐 OPI Master Portal Login")
-    uid = st.text_input("Username / Roll No")
-    pwd = st.text_input("Password", type="password")
-    if st.button("Access Portal"):
-        if uid == "admin" and pwd == "opi2026":
-            st.session_state.update({'auth': True, 'role': 'Admin'})
-            st.rerun()
+    st.title("🔐 OPI Master Portal")
+    u, p = st.text_input("User ID"), st.text_input("Password", type="password")
+    if st.button("Login"):
+        if u == "admin" and p == "opi2026":
+            st.session_state.update({'auth': True, 'role': 'Admin'}); st.rerun()
         else:
-            res = supabase.table("students").select("*").eq("roll_no", uid).eq("password", pwd).execute()
+            res = supabase.table("students").select("*").eq("roll_no", u).eq("password", p).execute()
             if res.data:
-                st.session_state.update({'auth': True, 'role': 'Student', 'user': res.data[0]})
-                st.rerun()
-            else:
-                st.error("Invalid credentials. Please try again.")
+                st.session_state.update({'auth': True, 'role': 'Student', 'user': res.data[0]}); st.rerun()
+            else: st.error("Invalid Credentials")
 else:
-    if st.sidebar.button("Log Out"):
-        st.session_state.auth = False
-        st.rerun()
+    if st.sidebar.button("Logout"):
+        st.session_state.auth = False; st.rerun()
 
-    # --- ADMIN VIEW ---
+    # --- ADMIN SIDE ---
     if st.session_state.role == "Admin":
-        st.title("👨‍🏫 OPI Admin Control Panel")
-        t1, t2 = st.tabs(["Enroll New Student", "Institutional Records"])
+        st.title("👨‍🏫 OPI Admin Control")
+        t1, t2, t3 = st.tabs(["Enroll Student", "Fee Management", "Master Records"])
         
         with t1:
-            with st.form("enrollment_form", clear_on_submit=True):
-                col1, col2 = st.columns(2)
-                with col1:
-                    r_no = st.text_input("Roll Number")
-                    name = st.text_input("Full Name")
-                    course = st.selectbox("Course", ["DMLT", "Radiology", "ECG", "Nursing"])
-                with col2:
-                    bg = st.selectbox("Blood Group", ["A+", "B+", "O+", "AB+", "A-", "B-", "O-", "AB-"])
-                    sess = st.text_input("Academic Session")
-                    p_word = st.text_input("Set Login Password")
-                
-                address_val = st.text_area("Full Address")
-                photo_file = st.file_uploader("Upload Student Photo", type=['png', 'jpg', 'jpeg'])
-                
-                if st.form_submit_button("Confirm Registration"):
-                    img_base64 = ""
-                    if photo_file:
-                        img_base64 = f"data:image/png;base64,{base64.b64encode(photo_file.getvalue()).decode()}"
-                    
-                    payload = {
-                        "roll_no": r_no, "name": name, "course": course,
-                        "blood_group": bg, "session": sess, "address": address_val,
-                        "password": p_word, "photo_url": img_base64
-                    }
-                    supabase.table("students").insert(payload).execute()
-                    st.success(f"Registered {name} successfully!")
+            with st.form("enroll", clear_on_submit=True):
+                c1, c2 = st.columns(2)
+                r, n = c1.text_input("Roll No"), c1.text_input("Name")
+                crs = c1.selectbox("Course", ["DMLT", "Radiology", "ECG", "Nursing"])
+                bg = c2.selectbox("B. Group", ["A+", "B+", "O+", "AB+"])
+                sess, p_set = c2.text_input("Session"), c2.text_input("Set Password")
+                addr = st.text_area("Address")
+                up = st.file_uploader("Photo", type=['jpg', 'png'])
+                if st.form_submit_button("Save Student"):
+                    img = f"data:image/png;base64,{base64.b64encode(up.getvalue()).decode()}" if up else ""
+                    supabase.table("students").insert({"roll_no": r, "name": n, "course": crs, "blood_group": bg, "session": sess, "address": addr, "password": p_set, "photo_url": img}).execute()
+                    st.success("Enrolled!")
 
         with t2:
-            st.subheader("📋 Student Master List")
-            # Pulling all columns from Supabase
-            all_records = supabase.table("students").select("*").execute()
-            if all_records.data:
-                st.dataframe(all_records.data)
-            else:
-                st.info("No records found in database.")
+            st.subheader("💰 Collect Fees")
+            students = supabase.table("students").select("roll_no", "name").execute().data
+            if students:
+                s_list = {f"{s['name']} ({s['roll_no']})": s['roll_no'] for s in students}
+                sel_s = st.selectbox("Select Student", list(s_list.keys()))
+                amt = st.number_input("Amount Paid", min_value=0)
+                f_type = st.selectbox("Fee Type", ["Admission", "Monthly Tuition", "Exam Fee", "Other"])
+                mode = st.selectbox("Payment Mode", ["Cash", "UPI/GPay", "Bank Transfer"])
+                if st.button("Generate Receipt"):
+                    r_id = f"OPI-{datetime.datetime.now().strftime('%y%m%d%H%M%S')}"
+                    p_data = {"roll_no": s_list[sel_s], "student_name": sel_s.split(" (")[0], "amount_paid": amt, "fee_type": f_type, "payment_mode": mode, "receipt_no": r_id, "payment_date": str(datetime.date.today())}
+                    supabase.table("fee_records").insert(p_data).execute()
+                    st.download_button("📩 Download Receipt", create_fee_receipt(p_data['student_name'], p_data['roll_no'], p_data), f"Receipt_{r_id}.pdf")
 
-    # --- STUDENT VIEW ---
+        with t3:
+            st.dataframe(supabase.table("students").select("*").execute().data)
+
+    # --- STUDENT SIDE ---
     elif st.session_state.role == "Student":
         s = st.session_state.user
-        st.title(f"👋 Welcome to the Portal, {s.get('name')}")
-        
-        col_img, col_info = st.columns([1, 2])
-        with col_img:
-            if s.get('photo_url') and len(str(s['photo_url'])) > 100:
-                st.image(s['photo_url'], width=200)
-            else:
-                st.info("No photo in record.")
-                
-        with col_info:
-            st.subheader("Your Profile Details")
-            st.write(f"**Roll No:** {s.get('roll_no')}")
-            st.write(f"**Course:** {s.get('course')}")
-            st.write(f"**Session:** {s.get('session')}")
-            st.write(f"**Address:** {s.get('address', 'N/A')}")
-            
-            # THE DOWNLOAD BUTTON
-            try:
-                id_pdf = create_id_card(s)
-                st.download_button(
-                    label="🪪 Download Official ID Card (PDF)",
-                    data=id_pdf,
-                    file_name=f"OPI_ID_{s.get('roll_no')}.pdf",
-                    mime="application/pdf"
-                )
-            except Exception as e:
-                st.error(f"Error generating ID: {e}")
+        st.title(f"👋 {s['name']}")
+        st.download_button("🪪 Download ID Card", create_id_card(s), f"ID_{s['roll_no']}.pdf")
+        st.subheader("💳 Your Payment History")
+        history = supabase.table("fee_records").select("*").eq("roll_no", s['roll_no']).execute().data
+        if history:
+            for p in history:
+                col_a, col_b = st.columns([3, 1])
+                col_a.write(f"**{p['fee_type']}** - ₹{p['amount_paid']} ({p['payment_date']})")
+                col_b.download_button("📄 PDF", create_fee_receipt(s['name'], s['roll_no'], p), f"Receipt_{p['receipt_no']}.pdf", key=p['receipt_no'])

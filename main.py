@@ -93,13 +93,14 @@ if 'auth' not in st.session_state:
 
 if not st.session_state.auth:
     st.title("🔐 OPI Master Portal")
-    u, p = st.text_input("User ID"), st.text_input("Password", type="password")
+    u, p = st.text_input("User ID / Roll No"), st.text_input("Password", type="password")
     if st.button("Access"):
         if u == "admin" and p == "opi2026":
             st.session_state.update({'auth': True, 'role': 'Admin'}); st.rerun()
         else:
             res = supabase.table("students").select("*").eq("roll_no", u).eq("password", p).execute()
-            if res.data: st.session_state.update({'auth': True, 'role': 'Student', 'user': res.data[0]}); st.rerun()
+            if res.data:
+                st.session_state.update({'auth': True, 'role': 'Student', 'user': res.data[0]}); st.rerun()
             else: st.error("Login Failed")
 else:
     if st.sidebar.button("Logout"):
@@ -108,15 +109,15 @@ else:
 
     if st.session_state.role == "Admin":
         st.title("👨‍🏫 OPI Admin Control")
-        tabs = st.tabs(["Enroll Student", "Fee Collection", "Exam Schedules", "Management & Defaulters"])
+        tabs = st.tabs(["Enroll Student", "Fee Collection", "Exam Management", "Records & Defaulters"])
         
         with tabs[0]: # ENROLLMENT
             with st.form("enroll_form"):
                 c1, c2 = st.columns(2)
                 r, n = c1.text_input("Roll No"), c1.text_input("Name")
                 crs = c1.selectbox("Course", COURSES)
-                ph, m_fee, pw = c1.text_input("WhatsApp (91...)"), c2.number_input("Monthly Fee", value=2500), c2.text_input("Password")
-                j_dt, addr = c2.date_input("Joining Date"), st.text_area("Address")
+                ph, m_fee, pw = c1.text_input("WhatsApp"), c2.number_input("Monthly Fee", value=2500), c2.text_input("Password")
+                j_dt, addr = c2.date_input("Joining Date", datetime.date.today()), st.text_area("Address")
                 up = st.file_uploader("Upload Student Photo", type=['jpg', 'png'])
                 if st.form_submit_button("Save Student"):
                     img = f"data:image/png;base64,{base64.b64encode(up.getvalue()).decode()}" if up else ""
@@ -124,36 +125,45 @@ else:
                     st.success("Enrolled!"); st.rerun()
 
         with tabs[1]: # FEE COLLECTION
-            st.subheader("💰 Record Payment")
+            st.subheader("💰 Smart Fee Collection")
             students = supabase.table("students").select("*").eq("is_active", True).execute().data
             if students:
                 s_dict = {f"{s['name']} (ID: {s['roll_no']})": s for s in students}
                 sel_s = s_dict[st.selectbox("Select Student", list(s_dict.keys()), key="fee_sel")]
                 f_cat = st.selectbox("Fee Type", ["Monthly Tuition", "Admission Fee", "Exam Fee", "Registration Fee"])
                 c_a, c_b = st.columns(2)
-                base = c_a.number_input("Base Amount", value=int(sel_s.get('monthly_fee_amount', 2500)) if f_cat == "Monthly Tuition" else 0)
-                f_desc, mode = c_b.text_input("Notes (e.g. June 2026)"), c_b.selectbox("Mode", ["Cash", "UPI", "Bank"])
+                base = c_a.number_input("Amount", value=int(sel_s.get('monthly_fee_amount', 2500)) if f_cat == "Monthly Tuition" else 0)
+                f_desc, mode = c_b.text_input("Notes (e.g. May 2026)"), c_b.selectbox("Mode", ["Cash", "UPI", "Bank"])
                 if st.button("Generate Receipt"):
                     r_id = f"OPI-{datetime.datetime.now().strftime('%y%m%d%H%M%S')}"
                     p_data = {"roll_no": sel_s['roll_no'], "student_name": sel_s['name'], "amount_paid": base, "fee_type": f"{f_cat} ({f_desc})", "receipt_no": r_id, "payment_date": str(datetime.date.today()), "payment_mode": mode}
                     supabase.table("fee_records").insert(p_data).execute()
                     st.download_button("📩 Download PDF", create_fee_receipt(sel_s['name'], sel_s['roll_no'], p_data), f"Rec_{r_id}.pdf")
 
-        with tabs[2]: # EXAM SCHEDULES
-            st.subheader("📅 Publish Examination")
-            with st.form("exam_form"):
+        with tabs[2]: # EXAM MANAGEMENT (With DELETE functionality)
+            st.subheader("📅 Publish & Manage Examinations")
+            with st.form("exam_form_new"):
                 e_crs = st.selectbox("Course Target", COURSES)
-                e_nm = st.text_input("Exam Heading")
-                e_subs = st.text_area("Schedule (Format: Subject : Date)")
+                e_nm = st.text_input("Exam Heading (e.g. Unit Test 1)")
+                st.write("📖 Format: `Subject : Date` (Example: `Anatomy : 15-06-2026`)")
+                e_subs = st.text_area("Subject Schedule")
                 c_x, c_y = st.columns(2)
-                e_tm = c_x.text_input("Reporting Time", value="09:30 AM")
-                e_vn = c_y.text_input("Venue", value="OPI Examination Hall")
-                if st.form_submit_button("Publish"):
+                e_tm, e_vn = c_x.text_input("Reporting Time", value="09:30 AM"), c_y.text_input("Venue", value="OPI Hall")
+                if st.form_submit_button("Publish Schedule"):
                     supabase.table("exam_schedules").insert({"course": e_crs, "exam_name": e_nm, "subject_details": e_subs, "reporting_time": e_tm, "venue": e_vn}).execute()
-                    st.success("Exam Schedule Published!")
-            st.dataframe(supabase.table("exam_schedules").select("*").execute().data)
+                    st.success(f"Published {e_nm}!"); st.rerun()
 
-        with tabs[3]: # MANAGEMENT & DEFAULTERS
+            st.divider(); st.write("📝 Existing Exam Schedules:")
+            all_exams = supabase.table("exam_schedules").select("*").order('id', desc=True).execute().data
+            if all_exams:
+                for ex in all_exams:
+                    col_info, col_del = st.columns([4, 1])
+                    with col_info: st.write(f"📌 **{ex['exam_name']}** - {ex['course']}")
+                    with col_del:
+                        if st.button("Delete 🗑️", key=f"del_ex_{ex['id']}"):
+                            supabase.table("exam_schedules").delete().eq("id", ex['id']).execute(); st.rerun()
+
+        with tabs[3]: # RECORDS, DEFAULTERS & EDITING
             recs = supabase.table("students").select("*").execute().data
             fees = supabase.table("fee_records").select("*").execute().data
             
@@ -161,16 +171,15 @@ else:
                 for s in recs:
                     if s['is_active']:
                         j_dt = datetime.datetime.strptime(s['joining_date'], '%Y-%m-%d').date()
-                        months_due = (datetime.date.today().year - j_dt.year) * 12 + datetime.date.today().month - j_dt.month + 1
+                        due_m = (datetime.date.today().year - j_dt.year) * 12 + datetime.date.today().month - j_dt.month + 1
                         paid_m = len([f for f in fees if str(f['roll_no']) == str(s['roll_no']) and "Monthly Tuition" in f['fee_type']])
-                        pending = months_due - paid_m
+                        pending = due_m - paid_m
                         c1, c2, c3 = st.columns([2, 1, 1])
                         c1.write(f"**{s['name']}** (Pending: {pending} Months)")
-                        if c2.button("View History", key=f"hist_{s['roll_no']}"): st.table([f for f in fees if str(f['roll_no']) == str(s['roll_no'])])
-                        if pending > 0: c3.markdown(f"[📲 Notify](https://wa.me/{s.get('phone')}?text=Dues: {pending} Months)")
+                        if c2.button("History", key=f"h_{s['roll_no']}"): st.table([f for f in fees if str(f['roll_no']) == str(s['roll_no'])])
+                        if pending > 0: c3.markdown(f"[📲 WA](https://wa.me/{s.get('phone')}?text=Dues: {pending} Months)")
             
             st.divider()
-            # Edit Mode Logic
             if st.session_state.edit_id:
                 t = next((s for s in recs if str(s['roll_no']) == str(st.session_state.edit_id)), None)
                 if t:
@@ -179,7 +188,7 @@ else:
                         ec = st.selectbox("Course", COURSES, index=COURSES.index(t['course']) if t['course'] in COURSES else 0)
                         curr_j = datetime.datetime.strptime(t['joining_date'], '%Y-%m-%d').date()
                         ej = st.date_input("Joining Date", value=curr_j)
-                        if st.form_submit_button("Update"):
+                        if st.form_submit_button("Update Student"):
                             supabase.table("students").update({"name": en, "course": ec, "joining_date": str(ej)}).eq("roll_no", t['roll_no']).execute()
                             st.session_state.edit_id = None; st.rerun()
                     if st.button("Cancel"): st.session_state.edit_id = None; st.rerun()
@@ -195,14 +204,11 @@ else:
                         supabase.table("students").delete().eq("roll_no", row['roll_no']).execute(); st.rerun()
 
     elif st.session_state.role == "Student":
-        s = st.session_state.user
-        st.title(f"👋 {s['name']}")
+        s = st.session_state.user; st.title(f"👋 {s['name']}")
         col1, col2 = st.columns([1, 2])
         with col1:
             if s.get('photo_url'): st.image(s['photo_url'], width=150)
             st.download_button("🪪 ID Card", create_id_card(s), f"ID_{s['roll_no']}.pdf")
-            
-            # ADMIT CARD
             st.divider()
             exams = supabase.table("exam_schedules").select("*").eq("course", s['course']).order('id', desc=True).execute().data
             if exams:
@@ -210,10 +216,10 @@ else:
                 if s.get('exam_cleared', False):
                     st.success(f"Admit Card: {ex['exam_name']}")
                     st.download_button("📄 Download Admit Card", create_admit_card(s, ex), f"Admit_{s['roll_no']}.pdf")
-                else: st.error("🔒 Admit Card Locked. Clear dues.")
+                else: st.error("🔒 Admit Card Locked. Clear dues at office.")
             else: st.write("No exams scheduled.")
         with col2:
-            st.subheader("💳 Payments")
+            st.subheader("💳 Your Payment Records")
             h = supabase.table("fee_records").select("*").eq("roll_no", str(s['roll_no'])).execute().data
             if h:
                 for p in h:

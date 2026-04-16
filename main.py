@@ -31,8 +31,11 @@ def create_id_card(student):
     
     pdf.set_text_color(255, 255, 255)
     pdf.set_font("Arial", 'B', 9)
-    pdf.set_xy(ox + 12, oy + 4) 
+    pdf.set_xy(ox + 12, oy + 2.5) 
     pdf.cell(cw - 12, 4, "OXFORD PARAMEDICAL INSTITUTE", ln=True, align='L')
+    pdf.set_font("Arial", '', 6)
+    pdf.set_xy(ox + 12, oy + 7)
+    pdf.cell(cw - 12, 3, "Near Daily Bazar, Dhupdhara 783123", ln=True, align='L')
     
     photo_data = student.get('photo_url', "")
     if photo_data and "base64," in str(photo_data):
@@ -68,9 +71,9 @@ def create_fee_receipt(student_name, roll_no, payment):
     pdf.add_page()
     pdf.set_fill_color(0, 51, 102); pdf.rect(10, 10, 190, 32, 'F')
     if os.path.exists("logo.png"): pdf.image("logo.png", x=15, y=12, h=28)
-    pdf.set_text_color(255, 255, 255); pdf.set_xy(50, 18); pdf.set_font("Arial", 'B', 18)
+    pdf.set_text_color(255, 255, 255); pdf.set_xy(50, 15); pdf.set_font("Arial", 'B', 18)
     pdf.cell(0, 8, "OXFORD PARAMEDICAL INSTITUTE", ln=True)
-    pdf.set_font("Arial", '', 11); pdf.set_x(50); pdf.cell(0, 6, "Guwahati | Dhupdhara, Assam", ln=True)
+    pdf.set_font("Arial", '', 11); pdf.set_x(50); pdf.cell(0, 6, "Near Daily Bazar, Dhupdhara 783123", ln=True)
     
     pdf.set_text_color(0, 0, 0); pdf.set_xy(10, 50); pdf.set_font("Arial", 'B', 14)
     pdf.cell(0, 10, "OFFICIAL MONEY RECEIPT", ln=True, align='C')
@@ -91,8 +94,6 @@ def create_fee_receipt(student_name, roll_no, payment):
     pdf.set_font("Arial", 'I', 10)
     pdf.cell(0, 10, f"Payment Mode: {payment['payment_mode']}", ln=True)
     
-    # --- SIGNATURE SECTION ---
-    # Looks for signature.png in the same GitHub folder
     if os.path.exists("signature.png"):
         pdf.image("signature.png", x=150, y=105, h=15)
     
@@ -101,7 +102,7 @@ def create_fee_receipt(student_name, roll_no, payment):
     
     return pdf.output(dest='S').encode('latin-1')
 
-# --- 3. AUTHENTICATION ---
+# --- 3. AUTHENTICATION & APP LOGIC (Remains the same) ---
 if 'auth' not in st.session_state:
     st.session_state.update({'auth': False, 'role': None, 'user': None})
 

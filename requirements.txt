@@ -1,6 +1,5 @@
 streamlit
-pandas
 supabase
 fpdf
-requests
-Pillow
+pillow
+python-dateutil

@@ -61,18 +61,26 @@ if 'auth' not in st.session_state:
 
 if not st.session_state.auth:
     st.title("🔐 OPI Master Portal")
-    u, p = st.text_input("User ID"), st.text_input("Password", type="password")
+    u = st.text_input("User ID / Roll No")
+    p = st.text_input("Password", type="password")
     if st.button("Access System"):
+        # Admin check
         if u == "admin" and p == "opi2026":
-            st.session_state.update({'auth': True, 'role': 'Admin'}); st.rerun()
+            st.session_state.update({'auth': True, 'role': 'Admin'})
+            st.rerun()
         else:
+            # Student check - Handling both string and numeric roll numbers
             res = supabase.table("students").select("*").eq("roll_no", u).eq("password", p).execute()
             if res.data:
-                st.session_state.update({'auth': True, 'role': 'Student', 'user': res.data[0]}); st.rerun()
-            else: st.error("Login Failed")
+                st.session_state.update({'auth': True, 'role': 'Student', 'user': res.data[0]})
+                st.rerun()
+            else:
+                st.error("Login Failed: Please check your Roll No and Password.")
 else:
     if st.sidebar.button("Logout"):
-        st.session_state.auth = False; st.rerun()
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
+        st.rerun()
 
     if st.session_state.role == "Admin":
         st.title("👨‍🏫 OPI Admin Control")
@@ -85,8 +93,6 @@ else:
                 r, n = c1.text_input("Roll No"), c1.text_input("Name")
                 crs = c1.selectbox("Course", ["DMLT", "Radiology", "ECG Technician", "Nursing Assistant"])
                 ph = c1.text_input("WhatsApp No (e.g., 91...)")
-                
-                # --- RESTORED JOINING DATE ---
                 j_date = c2.date_input("Joining Date", datetime.date.today())
                 m_fee = c2.number_input("Monthly Fee Amount", value=2500)
                 p_set = c2.text_input("Set Password")
@@ -104,13 +110,10 @@ else:
                 s_dict = {f"{s['name']} (Roll: {s['roll_no']})": s for s in students}
                 sel_name = st.selectbox("Select Student", list(s_dict.keys()))
                 sel_s = s_dict[sel_name]
-                
-                # Show joining date for context
                 st.info(f"📅 Student Joined on: {sel_s.get('joining_date')}")
 
                 late_fine = 0; today = datetime.date.today()
                 f_cat = st.selectbox("Category", ["Monthly Tuition", "Admission Fee", "Registration Fee", "Examination Fee"])
-                
                 if f_cat == "Monthly Tuition" and today.day > 10:
                     late_fine = (today.day - 10) * 50
                     st.warning(f"⚠️ Late fine calculated: ₹{late_fine}")
@@ -118,7 +121,7 @@ else:
                 col_a, col_b = st.columns(2)
                 base_amt = col_a.number_input("Base Amount", value=int(sel_s.get('monthly_fee_amount', 2500)) if f_cat == "Monthly Tuition" else 0)
                 fine_to_apply = col_a.number_input("Fine to Add", value=late_fine)
-                f_desc = col_b.text_input("Month/Description (e.g. May 2026)")
+                f_desc = col_b.text_input("Month/Description")
                 mode = col_b.selectbox("Mode", ["Cash", "UPI", "Bank"])
                 
                 if st.button("Generate Receipt"):
@@ -133,9 +136,8 @@ else:
             st.subheader("📋 OPI Database & Reminders")
             recs = supabase.table("students").select("*").execute().data
             
-            # --- EDIT MODAL (RE-ADDED JOINING DATE) ---
             if st.session_state.edit_mode:
-                edit_s = next((item for item in recs if item["roll_no"] == st.session_state.edit_student_id), None)
+                edit_s = next((item for item in recs if str(item["roll_no"]) == str(st.session_state.edit_student_id)), None)
                 if edit_s:
                     st.info(f"🛠️ Editing: {edit_s['name']}")
                     with st.form("edit_form"):
@@ -143,8 +145,6 @@ else:
                         e_name = c_e1.text_input("Name", value=edit_s['name'])
                         e_ph = c_e1.text_input("Phone", value=edit_s.get('phone', ''))
                         e_pass = c_e1.text_input("Password", value=edit_s['password'])
-                        
-                        # --- EDIT JOINING DATE ---
                         current_j = datetime.datetime.strptime(edit_s['joining_date'], '%Y-%m-%d').date() if edit_s.get('joining_date') else datetime.date.today()
                         e_jdate = c_e2.date_input("Joining Date", value=current_j)
                         e_fee = c_e2.number_input("Monthly Fee", value=int(edit_s.get('monthly_fee_amount', 2500)))
@@ -153,23 +153,34 @@ else:
                         if st.form_submit_button("Update Data"):
                             supabase.table("students").update({"name": e_name, "phone": e_ph, "password": e_pass, "monthly_fee_amount": e_fee, "address": e_addr, "joining_date": str(e_jdate)}).eq("roll_no", edit_s['roll_no']).execute()
                             st.session_state.edit_mode = False; st.success("Updated!"); st.rerun()
-                        if st.button("Cancel"):
+                        if st.form_submit_button("Cancel"):
                             st.session_state.edit_mode = False; st.rerun()
 
-            # --- MASTER TABLE DISPLAY ---
             for row in recs:
                 c1, c2, c3, c4 = st.columns([2, 1, 1, 1])
                 c1.write(f"**{row['name']}** ({row['roll_no']}) Joined: {row.get('joining_date')}")
                 c2.write(f"PW: `{row['password']}`")
-                
                 if c3.button("Edit ✏️", key=f"ed_{row['roll_no']}"):
                     st.session_state.edit_mode = True
                     st.session_state.edit_student_id = row['roll_no']
                     st.rerun()
-                
-                # WhatsApp Reminder
                 today = datetime.date.today()
                 fine = (today.day - 10) * 50 if today.day > 10 else 0
-                msg = f"Dear {row['name']}, OPI reminder: Your fees for {today.strftime('%B')} are due. Current fine is Rs {fine}."
+                msg = f"Dear {row['name']}, OPI reminder: Your fees for {today.strftime('%B')} are due. Fine: Rs {fine}."
                 wa_link = f"https://wa.me/{row.get('phone')}?text={urllib.parse.quote(msg)}"
                 c4.markdown(f"[📲 Send Reminder]({wa_link})")
+
+    elif st.session_state.role == "Student":
+        s = st.session_state.user
+        st.title(f"👋 {s['name']}")
+        col1, col2 = st.columns([1, 2])
+        with col1:
+            if s.get('photo_url'): st.image(s['photo_url'], width=150)
+            st.download_button("🪪 ID Card", create_id_card(s), f"ID_{s['roll_no']}.pdf")
+        with col2:
+            st.subheader("💳 Your Payment Records")
+            history = supabase.table("fee_records").select("*").eq("roll_no", s['roll_no']).execute().data
+            if history:
+                for p in history:
+                    st.write(f"**{p['fee_type']}** | ₹{p['amount_paid']} | {p['payment_date']}")
+                    st.download_button("📄 Receipt", create_fee_receipt(s['name'], s['roll_no'], p), f"Rec_{p['receipt_no']}.pdf", key=p['receipt_no'])

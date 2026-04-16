@@ -6,93 +6,85 @@ import os
 st.set_page_config(page_title="OPI Master System", layout="wide")
 DATA_FILE = "opi_master_records.csv"
 
-# Initialize the CSV file if it doesn't exist
 if not os.path.exists(DATA_FILE):
     df = pd.DataFrame(columns=["Roll_No", "Name", "Course", "Phone", "Blood_Group", "Session", "Password"])
     df.to_csv(DATA_FILE, index=False)
 
-# --- 2. AUTHENTICATION ---
+# --- 2. AUTHENTICATION STATE ---
 if 'auth_state' not in st.session_state:
-    st.session_state.auth_state = False
+    st.session_state.update({'auth_state': False, 'role': None, 'user_data': None})
 
-def login():
-    st.markdown("<h2 style='text-align: center;'>OPI Admin Control</h2>", unsafe_allow_html=True)
+def login_logic(user, pw):
+    # Check Admin first
+    if user == "admin" and pw == "opi2026":
+        st.session_state.update({'auth_state': True, 'role': 'Admin', 'user_data': 'Admin'})
+        return True
+    
+    # Check Student Records
+    df = pd.read_csv(DATA_FILE)
+    # Filter by Roll_No and Password
+    user_match = df[(df['Roll_No'] == user) & (df['Password'].astype(str) == pw)]
+    
+    if not user_match.empty:
+        st.session_state.update({'auth_state': True, 'role': 'Student', 'user_data': user_match.iloc[0]})
+        return True
+    return False
+
+# --- 3. UI - LOGIN ---
+if not st.session_state.auth_state:
+    st.markdown("<h2 style='text-align: center;'>OPI Portal Login</h2>", unsafe_allow_html=True)
     with st.container():
-        user = st.text_input("Admin Username")
-        pw = st.text_input("Password", type="password")
-        if st.button("Login to Master System"):
-            if user == "admin" and pw == "opi2026": # You can change this
-                st.session_state.auth_state = True
+        u = st.text_input("Username (Admin or Roll No)")
+        p = st.text_input("Password", type="password")
+        if st.button("Enter Portal"):
+            if login_logic(u, p):
                 st.rerun()
             else:
-                st.error("Access Denied")
+                st.error("Invalid Username or Password")
 
-# --- 3. MAIN APPLICATION ---
-if not st.session_state.auth_state:
-    login()
+# --- 4. UI - AUTHORIZED AREA ---
 else:
-    st.sidebar.title("OPI Navigation")
-    menu = st.sidebar.radio("Go To", ["Dashboard", "Register New Student", "View Records", "Logout"])
-
-    if menu == "Logout":
-        st.session_state.auth_state = False
+    st.sidebar.title(f"Logged in as: {st.session_state.role}")
+    if st.sidebar.button("Logout"):
+        st.session_state.update({'auth_state': False, 'role': None, 'user_data': None})
         st.rerun()
 
-    elif menu == "Dashboard":
-        st.title("📊 OPI Master Dashboard")
-        df = pd.read_csv(DATA_FILE)
+    # --- ADMIN VIEW ---
+    if st.session_state.role == "Admin":
+        menu = st.sidebar.radio("Navigation", ["Dashboard", "Register Student", "Master Records"])
         
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Total Students", len(df))
-        col2.metric("DMLT Students", len(df[df['Course'] == 'DMLT']))
-        col3.metric("New Admissions (2026)", len(df[df['Session'].str.contains('2026', na=False)]))
+        if menu == "Dashboard":
+            st.title("📊 OPI Master Dashboard")
+            df = pd.read_csv(DATA_FILE)
+            st.metric("Total Students Registered", len(df))
+            st.dataframe(df)
 
-    elif menu == "Register New Student":
-        st.title("📝 Student Registration")
-        with st.form("registration_form", clear_on_submit=True):
-            col_a, col_b = st.columns(2)
-            with col_a:
-                roll = st.text_input("Roll Number (Unique ID)")
-                name = st.text_input("Full Name")
-                course = st.selectbox("Course", ["DMLT", "ICU Technology", "ECG Technician", "Nursing"])
-            with col_b:
-                phone = st.text_input("Phone Number")
-                bg = st.selectbox("Blood Group", ["A+", "A-", "B+", "B-", "O+", "O-", "AB+", "AB-"])
-                sess = st.text_input("Academic Session (e.g., 2026-2028)")
-            
-            # This password will be used by the student for their portal later
-            std_pass = st.text_input("Set Student Portal Password", type="password")
-            
-            submit = st.form_submit_button("Save to Master Record")
-            
-            if submit:
-                if roll and name and std_pass:
-                    # Load existing data
+        elif menu == "Register Student":
+            st.title("📝 New Registration")
+            with st.form("reg"):
+                r = st.text_input("Roll Number")
+                n = st.text_input("Full Name")
+                c = st.selectbox("Course", ["DMLT", "ICU", "ECG"])
+                p_set = st.text_input("Set Student Password")
+                if st.form_submit_button("Save Student"):
                     df = pd.read_csv(DATA_FILE)
-                    
-                    # Check if Roll No exists
-                    if roll in df['Roll_No'].values:
-                        st.error(f"Error: Roll Number {roll} is already registered!")
-                    else:
-                        # Append new data
-                        new_entry = pd.DataFrame([[roll, name, course, phone, bg, sess, std_pass]], 
-                                                 columns=df.columns)
-                        new_entry.to_csv(DATA_FILE, mode='a', header=False, index=False)
-                        st.success(f"Successfully Registered: {name}")
-                else:
-                    st.warning("Please fill Roll No, Name, and Password.")
+                    new_row = pd.DataFrame([[r, n, c, "N/A", "N/A", "2026", p_set]], columns=df.columns)
+                    new_row.to_csv(DATA_FILE, mode='a', header=False, index=False)
+                    st.success("Student Added!")
 
-    elif menu == "View Records":
-        st.title("📋 Master Student List")
-        df = pd.read_csv(DATA_FILE)
+    # --- STUDENT VIEW ---
+    elif st.session_state.role == "Student":
+        data = st.session_state.user_data
+        st.title(f"🎓 Welcome, {data['Name']}")
         
-        # Search Bar
-        search = st.text_input("Search by Name or Roll No")
-        if search:
-            df = df[df['Name'].str.contains(search, case=False) | df['Roll_No'].str.contains(search, case=False)]
-            
-        st.dataframe(df, use_container_width=True)
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader("Your Profile")
+            st.write(f"**Roll Number:** {data['Roll_No']}")
+            st.write(f"**Course:** {data['Course']}")
+            st.write(f"**Session:** {data['Session']}")
         
-        # Download Option
-        csv = df.to_csv(index=False).encode('utf-8')
-        st.download_button("Export Master List (CSV)", csv, "OPI_Master_Records.csv", "text/csv")
+        with col2:
+            st.subheader("Your Documents")
+            st.info("Admit Card: Pending Release")
+            st.info("ID Card: Ready for Collection")

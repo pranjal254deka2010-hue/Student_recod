@@ -75,15 +75,15 @@ else:
 
     if st.session_state.role == "Admin":
         st.title("👨‍🏫 OPI Admin Control")
-        t1, t2, t3 = st.tabs(["Enroll Student", "Fee Collection", "Master Records & Editing"])
+        t1, t2, t3 = st.tabs(["Enroll Student", "Fee Collection", "Master Records & Management"])
         
         with t1:
             st.subheader("📝 New Enrollment")
             with st.form("enroll", clear_on_submit=True):
                 c1, c2 = st.columns(2)
                 r, n = c1.text_input("Roll No"), c1.text_input("Name")
-                crs = c1.selectbox("Course", ["DMLT", "Radiology", "ECG", "Nursing Assistant"])
-                ph = c1.text_input("WhatsApp Number (e.g., 91...)")
+                crs = c1.selectbox("Course", ["DMLT", "Radiology", "ECG Technician", "Nursing Assistant"])
+                ph = c1.text_input("WhatsApp No (e.g., 91...)")
                 m_fee = c2.number_input("Monthly Fee Amount", value=2500)
                 p_set = c2.text_input("Set Password")
                 addr = st.text_area("Address")
@@ -122,50 +122,45 @@ else:
                     st.download_button("📩 Download PDF", create_fee_receipt(sel_s['name'], sel_s['roll_no'], p_data), f"Rec_{r_id}.pdf")
 
         with t3:
-            st.subheader("📋 Student List & Management")
-            
-            # Fetch fresh records
+            st.subheader("📋 OPI Database & Reminders")
             recs = supabase.table("students").select("*").execute().data
             
-            # --- EDIT MODAL LOGIC ---
+            # --- EDIT MODAL (Appears when 'Edit' is clicked) ---
             if st.session_state.edit_mode:
-                st.warning(f"🛠️ Editing Record for Roll No: {st.session_state.edit_student_id}")
-                # Find the specific student data
                 edit_s = next((item for item in recs if item["roll_no"] == st.session_state.edit_student_id), None)
-                
                 if edit_s:
+                    st.info(f"🛠️ Editing: {edit_s['name']}")
                     with st.form("edit_form"):
-                        e_name = st.text_input("Full Name", value=edit_s['name'])
-                        e_course = st.selectbox("Course", ["DMLT", "Radiology", "ECG", "Nursing Assistant"], index=["DMLT", "Radiology", "ECG", "Nursing Assistant"].index(edit_s['course']))
-                        e_phone = st.text_input("Phone", value=edit_s.get('phone', ''))
-                        e_pass = st.text_input("Reset Password", value=edit_s['password'])
-                        e_fee = st.number_input("Monthly Fee Amount", value=int(edit_s.get('monthly_fee_amount', 2500)))
+                        e_name = st.text_input("Name", value=edit_s['name'])
+                        e_ph = st.text_input("Phone", value=edit_s.get('phone', ''))
+                        e_pass = st.text_input("Password", value=edit_s['password'])
+                        e_fee = st.number_input("Monthly Fee", value=int(edit_s.get('monthly_fee_amount', 2500)))
                         e_addr = st.text_area("Address", value=edit_s.get('address', ''))
-                        
-                        col_save, col_cancel = st.columns(2)
-                        if col_save.form_submit_button("Update Student Data"):
-                            supabase.table("students").update({
-                                "name": e_name, "course": e_course, "phone": e_phone,
-                                "password": e_pass, "monthly_fee_amount": e_fee, "address": e_addr
-                            }).eq("roll_no", edit_s['roll_no']).execute()
-                            st.session_state.edit_mode = False
-                            st.success("Record Updated!")
-                            st.rerun()
-                        if col_cancel.form_submit_button("Cancel"):
-                            st.session_state.edit_mode = False
-                            st.rerun()
-            
-            # --- DISPLAY TABLE ---
+                        if st.form_submit_button("Update Data"):
+                            supabase.table("students").update({"name": e_name, "phone": e_ph, "password": e_pass, "monthly_fee_amount": e_fee, "address": e_addr}).eq("roll_no", edit_s['roll_no']).execute()
+                            st.session_state.edit_mode = False; st.success("Updated!"); st.rerun()
+                        if st.button("Cancel"):
+                            st.session_state.edit_mode = False; st.rerun()
+
+            # --- MASTER TABLE DISPLAY ---
             for row in recs:
-                col_n, col_p, col_btn = st.columns([2, 1, 1])
-                col_n.write(f"**{row['name']}** ({row['roll_no']})")
-                col_p.write(f"PWD: `{row['password']}`")
+                c1, c2, c3, c4 = st.columns([2, 1, 1, 1])
+                c1.write(f"**{row['name']}** ({row['roll_no']})")
+                c2.write(f"PW: `{row['password']}`")
                 
-                # Edit Button triggers edit_mode
-                if col_btn.button("Edit ✏️", key=f"edit_{row['roll_no']}"):
+                # Edit Button
+                if c3.button("Edit ✏️", key=f"ed_{row['roll_no']}"):
                     st.session_state.edit_mode = True
                     st.session_state.edit_student_id = row['roll_no']
                     st.rerun()
+                
+                # WhatsApp Reminder Logic
+                today = datetime.date.today()
+                fine = (today.day - 10) * 50 if today.day > 10 else 0
+                msg = f"Dear {row['name']}, OPI reminder: Your fees for {today.strftime('%B')} are due."
+                if fine > 0: msg += f" Current fine is Rs {fine}."
+                wa_link = f"https://wa.me/{row.get('phone')}?text={urllib.parse.quote(msg)}"
+                c4.markdown(f"[📲 Send Reminder]({wa_link})")
 
     elif st.session_state.role == "Student":
         s = st.session_state.user
@@ -173,7 +168,7 @@ else:
         col1, col2 = st.columns([1, 2])
         with col1:
             if s.get('photo_url'): st.image(s['photo_url'], width=150)
-            st.download_button("🪪 Download ID Card", create_id_card(s), f"ID_{s['roll_no']}.pdf")
+            st.download_button("🪪 ID Card", create_id_card(s), f"ID_{s['roll_no']}.pdf")
         with col2:
             st.subheader("💳 Your Payment Records")
             history = supabase.table("fee_records").select("*").eq("roll_no", s['roll_no']).execute().data

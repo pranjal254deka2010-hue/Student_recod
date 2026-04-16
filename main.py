@@ -7,7 +7,6 @@ from PIL import Image
 import os
 import datetime
 import urllib.parse
-from dateutil.relativedelta import relativedelta
 
 # --- 1. DATABASE CONNECTION ---
 url = st.secrets["SUPABASE_URL"]
@@ -17,6 +16,7 @@ supabase: Client = create_client(url, key)
 st.set_page_config(page_title="OPI Master Portal", layout="wide")
 
 # --- 2. DOCUMENT GENERATORS ---
+
 def create_id_card(student):
     pdf = FPDF(orientation='P', unit='mm', format='A4')
     pdf.add_page()
@@ -26,15 +26,20 @@ def create_id_card(student):
     if os.path.exists("logo.png"): pdf.image("logo.png", x=ox + 2, y=oy + 1.5, h=9)
     pdf.set_text_color(255, 255, 255); pdf.set_font("Arial", 'B', 9); pdf.set_xy(ox + 12, oy + 4)
     pdf.cell(cw - 12, 4, "OXFORD PARAMEDICAL INSTITUTE", ln=True, align='L')
+    
     photo_data = student.get('photo_url', "")
     if photo_data and "base64," in str(photo_data):
-        try: pdf.image(BytesIO(base64.b64decode(photo_data.split(",")[1])), x=ox + 62, y=oy + 15, w=18, h=22)
+        try:
+            pdf.image(BytesIO(base64.b64decode(photo_data.split(",")[1])), x=ox + 62, y=oy + 15, w=18, h=22)
         except: pdf.rect(ox + 62, oy + 15, 18, 22)
+    
     pdf.set_text_color(0, 0, 0); pdf.set_font("Arial", 'B', 8)
     fields = [("NAME:", student.get('name')), ("ROLL NO:", student.get('roll_no')), ("COURSE:", student.get('course'))]
     y = oy + 18
     for lbl, val in fields:
-        pdf.set_xy(ox + 4, y); pdf.cell(18, 5, lbl); pdf.set_font("Arial", '', 8); pdf.cell(40, 5, str(val).upper(), ln=True); y += 6; pdf.set_font("Arial", 'B', 8)
+        pdf.set_xy(ox + 4, y); pdf.cell(18, 5, lbl); pdf.set_font("Arial", '', 8)
+        pdf.cell(40, 5, str(val if val else "N/A").upper(), ln=True); y += 6; pdf.set_font("Arial", 'B', 8)
+    
     pdf.set_xy(ox + 4, oy + 47); pdf.set_font("Arial", 'B', 7); pdf.cell(18, 4, "ADDRESS:", 0)
     pdf.set_font("Arial", '', 6); pdf.set_xy(ox + 22, oy + 47); pdf.multi_cell(40, 3, str(student.get('address', 'N/A')))
     return pdf.output(dest='S').encode('latin-1')
@@ -47,15 +52,30 @@ def create_fee_receipt(student_name, roll_no, payment):
     pdf.set_text_color(255, 255, 255); pdf.set_xy(50, 15); pdf.set_font("Arial", 'B', 18)
     pdf.cell(0, 8, "OXFORD PARAMEDICAL INSTITUTE", ln=True)
     pdf.set_font("Arial", '', 11); pdf.set_x(50); pdf.cell(0, 6, "Near Daily Bazar, Dhupdhara 783123", ln=True)
-    pdf.set_text_color(0, 0, 0); pdf.set_xy(10, 50); pdf.set_font("Arial", 'B', 14); pdf.cell(0, 10, "OFFICIAL MONEY RECEIPT", ln=True, align='C')
-    pdf.set_font("Arial", '', 11); pdf.cell(95, 8, f"Receipt No: {payment['receipt_no']}"); pdf.cell(95, 8, f"Date: {payment['payment_date']}", ln=True, align='R')
-    pdf.ln(10); pdf.set_fill_color(240, 240, 240); pdf.set_font("Arial", 'B', 10); pdf.cell(130, 10, "Description", border=1, fill=True); pdf.cell(60, 10, "Amount (INR)", border=1, fill=True, align='C', ln=True)
-    pdf.set_font("Arial", '', 11); pdf.cell(130, 20, f"Fees for {student_name} - {payment['fee_type']}", border=1); pdf.cell(60, 20, f"Rs. {payment['amount_paid']}/-", border=1, align='C', ln=True)
-    if os.path.exists("signature.png"): pdf.image("signature.png", x=145, y=110, h=30)
-    pdf.set_xy(140, 145); pdf.set_font("Arial", 'B', 10); pdf.cell(50, 5, "Authorized Signatory", border='T', align='C')
+    
+    pdf.set_text_color(0, 0, 0); pdf.set_xy(10, 50); pdf.set_font("Arial", 'B', 14)
+    pdf.cell(0, 10, "OFFICIAL MONEY RECEIPT", ln=True, align='C')
+    pdf.set_font("Arial", '', 11); pdf.cell(95, 8, f"Receipt No: {payment['receipt_no']}")
+    pdf.cell(95, 8, f"Date: {payment['payment_date']}", ln=True, align='R')
+    
+    pdf.ln(10); pdf.set_fill_color(240, 240, 240); pdf.set_font("Arial", 'B', 10)
+    pdf.cell(130, 10, "Description / Particulars", border=1, fill=True)
+    pdf.cell(60, 10, "Amount (INR)", border=1, fill=True, align='C', ln=True)
+    
+    pdf.set_font("Arial", '', 11)
+    pdf.cell(130, 20, f"Fees for {student_name} - {payment['fee_type']}", border=1)
+    pdf.cell(60, 20, f"Rs. {payment['amount_paid']}/-", border=1, align='C', ln=True)
+    
+    # Signature Placement
+    if os.path.exists("signature.png"):
+        pdf.image("signature.png", x=145, y=105, h=30)
+    
+    pdf.set_xy(140, 140); pdf.set_font("Arial", 'B', 10)
+    pdf.cell(50, 5, "Authorized Signatory", border='T', align='C')
+    
     return pdf.output(dest='S').encode('latin-1')
 
-# --- 3. APP LOGIC ---
+# --- 3. AUTHENTICATION ---
 if 'auth' not in st.session_state:
     st.session_state.update({'auth': False, 'role': None, 'user': None, 'edit_mode': False, 'edit_student_id': None})
 
@@ -64,30 +84,23 @@ if not st.session_state.auth:
     u = st.text_input("User ID / Roll No")
     p = st.text_input("Password", type="password")
     if st.button("Access System"):
-        # Admin check
         if u == "admin" and p == "opi2026":
-            st.session_state.update({'auth': True, 'role': 'Admin'})
-            st.rerun()
+            st.session_state.update({'auth': True, 'role': 'Admin'}); st.rerun()
         else:
-            # Student check - Handling both string and numeric roll numbers
             res = supabase.table("students").select("*").eq("roll_no", u).eq("password", p).execute()
             if res.data:
-                st.session_state.update({'auth': True, 'role': 'Student', 'user': res.data[0]})
-                st.rerun()
-            else:
-                st.error("Login Failed: Please check your Roll No and Password.")
+                st.session_state.update({'auth': True, 'role': 'Student', 'user': res.data[0]}); st.rerun()
+            else: st.error("Login Failed")
 else:
     if st.sidebar.button("Logout"):
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
+        for key in list(st.session_state.keys()): del st.session_state[key]
         st.rerun()
 
     if st.session_state.role == "Admin":
         st.title("👨‍🏫 OPI Admin Control")
-        t1, t2, t3 = st.tabs(["Enroll Student", "Fee Collection", "Master Records & Management"])
+        t1, t2, t3 = st.tabs(["Enroll Student", "Fee Collection", "Master Records"])
         
         with t1:
-            st.subheader("📝 New Enrollment")
             with st.form("enroll", clear_on_submit=True):
                 c1, c2 = st.columns(2)
                 r, n = c1.text_input("Roll No"), c1.text_input("Name")
@@ -110,8 +123,7 @@ else:
                 s_dict = {f"{s['name']} (Roll: {s['roll_no']})": s for s in students}
                 sel_name = st.selectbox("Select Student", list(s_dict.keys()))
                 sel_s = s_dict[sel_name]
-                st.info(f"📅 Student Joined on: {sel_s.get('joining_date')}")
-
+                
                 late_fine = 0; today = datetime.date.today()
                 f_cat = st.selectbox("Category", ["Monthly Tuition", "Admission Fee", "Registration Fee", "Examination Fee"])
                 if f_cat == "Monthly Tuition" and today.day > 10:
@@ -130,57 +142,58 @@ else:
                     if fine_to_apply > 0: desc += f" + Fine (₹{fine_to_apply})"
                     p_data = {"roll_no": sel_s['roll_no'], "student_name": sel_s['name'], "amount_paid": base_amt + fine_to_apply, "fee_type": desc, "receipt_no": r_id, "payment_date": str(today), "payment_mode": mode}
                     supabase.table("fee_records").insert(p_data).execute()
+                    # IMMEDIATE DOWNLOAD FOR ADMIN
                     st.download_button("📩 Download PDF", create_fee_receipt(sel_s['name'], sel_s['roll_no'], p_data), f"Rec_{r_id}.pdf")
 
         with t3:
-            st.subheader("📋 OPI Database & Reminders")
+            st.subheader("📋 OPI Database & Management")
             recs = supabase.table("students").select("*").execute().data
-            
             if st.session_state.edit_mode:
                 edit_s = next((item for item in recs if str(item["roll_no"]) == str(st.session_state.edit_student_id)), None)
                 if edit_s:
-                    st.info(f"🛠️ Editing: {edit_s['name']}")
                     with st.form("edit_form"):
-                        c_e1, c_e2 = st.columns(2)
-                        e_name = c_e1.text_input("Name", value=edit_s['name'])
-                        e_ph = c_e1.text_input("Phone", value=edit_s.get('phone', ''))
-                        e_pass = c_e1.text_input("Password", value=edit_s['password'])
-                        current_j = datetime.datetime.strptime(edit_s['joining_date'], '%Y-%m-%d').date() if edit_s.get('joining_date') else datetime.date.today()
-                        e_jdate = c_e2.date_input("Joining Date", value=current_j)
-                        e_fee = c_e2.number_input("Monthly Fee", value=int(edit_s.get('monthly_fee_amount', 2500)))
-                        e_addr = st.text_area("Address", value=edit_s.get('address', ''))
-                        
+                        e_name = st.text_input("Name", value=edit_s['name'])
+                        e_ph = st.text_input("Phone", value=edit_s.get('phone', ''))
+                        e_pass = st.text_input("Password", value=edit_s['password'])
+                        e_fee = st.number_input("Monthly Fee", value=int(edit_s.get('monthly_fee_amount', 2500)))
                         if st.form_submit_button("Update Data"):
-                            supabase.table("students").update({"name": e_name, "phone": e_ph, "password": e_pass, "monthly_fee_amount": e_fee, "address": e_addr, "joining_date": str(e_jdate)}).eq("roll_no", edit_s['roll_no']).execute()
+                            supabase.table("students").update({"name": e_name, "phone": e_ph, "password": e_pass, "monthly_fee_amount": e_fee}).eq("roll_no", edit_s['roll_no']).execute()
                             st.session_state.edit_mode = False; st.success("Updated!"); st.rerun()
-                        if st.form_submit_button("Cancel"):
-                            st.session_state.edit_mode = False; st.rerun()
+                        if st.form_submit_button("Cancel"): st.session_state.edit_mode = False; st.rerun()
 
             for row in recs:
                 c1, c2, c3, c4 = st.columns([2, 1, 1, 1])
-                c1.write(f"**{row['name']}** ({row['roll_no']}) Joined: {row.get('joining_date')}")
+                c1.write(f"**{row['name']}** ({row['roll_no']})")
                 c2.write(f"PW: `{row['password']}`")
                 if c3.button("Edit ✏️", key=f"ed_{row['roll_no']}"):
-                    st.session_state.edit_mode = True
-                    st.session_state.edit_student_id = row['roll_no']
-                    st.rerun()
-                today = datetime.date.today()
-                fine = (today.day - 10) * 50 if today.day > 10 else 0
-                msg = f"Dear {row['name']}, OPI reminder: Your fees for {today.strftime('%B')} are due. Fine: Rs {fine}."
+                    st.session_state.edit_mode = True; st.session_state.edit_student_id = row['roll_no']; st.rerun()
+                today = datetime.date.today(); fine = (today.day - 10) * 50 if today.day > 10 else 0
+                msg = f"OPI Reminder: Fees for {today.strftime('%B')} are due. Fine: Rs {fine}."
                 wa_link = f"https://wa.me/{row.get('phone')}?text={urllib.parse.quote(msg)}"
                 c4.markdown(f"[📲 Send Reminder]({wa_link})")
 
     elif st.session_state.role == "Student":
         s = st.session_state.user
-        st.title(f"👋 {s['name']}")
+        st.title(f"👋 Welcome, {s['name']}")
         col1, col2 = st.columns([1, 2])
         with col1:
             if s.get('photo_url'): st.image(s['photo_url'], width=150)
             st.download_button("🪪 ID Card", create_id_card(s), f"ID_{s['roll_no']}.pdf")
         with col2:
-            st.subheader("💳 Your Payment Records")
-            history = supabase.table("fee_records").select("*").eq("roll_no", s['roll_no']).execute().data
+            st.subheader("💳 Your Payment History")
+            # Pulling receipts specifically for this roll number
+            history = supabase.table("fee_records").select("*").eq("roll_no", str(s['roll_no'])).execute().data
             if history:
                 for p in history:
-                    st.write(f"**{p['fee_type']}** | ₹{p['amount_paid']} | {p['payment_date']}")
-                    st.download_button("📄 Receipt", create_fee_receipt(s['name'], s['roll_no'], p), f"Rec_{p['receipt_no']}.pdf", key=p['receipt_no'])
+                    with st.container():
+                        st.write(f"**{p['fee_type']}** | ₹{p['amount_paid']} | {p['payment_date']}")
+                        # KEY FIX: The receipt generation was sometimes failing inside a loop.
+                        # We use a unique key for every download button.
+                        st.download_button(
+                            label=f"📄 Download Receipt ({p['receipt_no']})", 
+                            data=create_fee_receipt(s['name'], s['roll_no'], p), 
+                            file_name=f"OPI_Rec_{p['receipt_no']}.pdf",
+                            key=f"dl_{p['receipt_no']}"
+                        )
+                        st.divider()
+            else: st.info("No payment records found.")

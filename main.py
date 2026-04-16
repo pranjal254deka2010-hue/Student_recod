@@ -6,7 +6,6 @@ from io import BytesIO
 from PIL import Image
 import os
 import datetime
-from dateutil.relativedelta import relativedelta
 
 # --- 1. DATABASE CONNECTION ---
 url = st.secrets["SUPABASE_URL"]
@@ -26,25 +25,21 @@ def create_id_card(student):
     if os.path.exists("logo.png"): pdf.image("logo.png", x=ox + 2, y=oy + 1.5, h=9)
     pdf.set_text_color(255, 255, 255); pdf.set_font("Arial", 'B', 9); pdf.set_xy(ox + 12, oy + 2.5) 
     pdf.cell(cw - 12, 4, "OXFORD PARAMEDICAL INSTITUTE", ln=True, align='L')
-    pdf.set_font("Arial", '', 6); pdf.set_xy(ox + 12, oy + 7)
-    pdf.cell(cw - 12, 3, "Near Daily Bazar, Dhupdhara 783123", ln=True, align='L')
+    pdf.set_font("Arial", '', 6); pdf.set_xy(ox + 12, oy + 7); pdf.cell(cw - 12, 3, "Near Daily Bazar, Dhupdhara 783123", ln=True, align='L')
     
     photo_data = student.get('photo_url', "")
     if photo_data and "base64," in str(photo_data):
-        try:
-            pdf.image(BytesIO(base64.b64decode(photo_data.split(",")[1])), x=ox + 62, y=oy + 15, w=18, h=22)
+        try: pdf.image(BytesIO(base64.b64decode(photo_data.split(",")[1])), x=ox + 62, y=oy + 15, w=18, h=22)
         except: pdf.rect(ox + 62, oy + 15, 18, 22)
     
     pdf.set_text_color(0, 0, 0); pdf.set_font("Arial", 'B', 8)
-    fields = [("NAME:", student.get('name')), ("ROLL NO:", student.get('roll_no')), ("COURSE:", student.get('course')), ("SESSION:", student.get('session'))]
+    fields = [("NAME:", student.get('name')), ("ROLL NO:", student.get('roll_no')), ("COURSE:", student.get('course'))]
     y = oy + 18
     for lbl, val in fields:
-        pdf.set_xy(ox + 4, y); pdf.cell(18, 5, lbl); pdf.set_font("Arial", '', 8)
-        pdf.cell(40, 5, str(val if val else "N/A").upper(), ln=True); y += 6; pdf.set_font("Arial", 'B', 8)
+        pdf.set_xy(ox + 4, y); pdf.cell(18, 5, lbl); pdf.set_font("Arial", '', 8); pdf.cell(40, 5, str(val).upper(), ln=True); y += 6; pdf.set_font("Arial", 'B', 8)
     
     pdf.set_xy(ox + 4, oy + 47); pdf.set_font("Arial", 'B', 7); pdf.cell(18, 4, "ADDRESS:", 0)
-    pdf.set_font("Arial", '', 6); pdf.set_xy(ox + 22, oy + 47)
-    pdf.multi_cell(40, 3, str(student.get('address', 'N/A')))
+    pdf.set_font("Arial", '', 6); pdf.set_xy(ox + 22, oy + 47); pdf.multi_cell(40, 3, str(student.get('address', 'N/A')))
     return pdf.output(dest='S').encode('latin-1')
 
 def create_fee_receipt(student_name, roll_no, payment):
@@ -72,7 +67,7 @@ def create_fee_receipt(student_name, roll_no, payment):
     pdf.set_xy(140, 145); pdf.set_font("Arial", 'B', 10); pdf.cell(50, 5, "Authorized Signatory", border='T', align='C')
     return pdf.output(dest='S').encode('latin-1')
 
-# --- 3. AUTHENTICATION & PORTAL LOGIC ---
+# --- 3. APP LOGIC ---
 if 'auth' not in st.session_state:
     st.session_state.update({'auth': False, 'role': None, 'user': None})
 
@@ -93,15 +88,14 @@ else:
 
     if st.session_state.role == "Admin":
         st.title("👨‍🏫 OPI Admin Control")
-        t1, t2, t3 = st.tabs(["Enroll Student", "Monthly Fee Collection", "Master Records"])
+        t1, t2, t3 = st.tabs(["Enroll Student", "Fee Collection & Fines", "Master Records"])
         
         with t1:
             with st.form("enroll", clear_on_submit=True):
                 c1, c2 = st.columns(2)
                 r, n = c1.text_input("Roll No"), c1.text_input("Name")
                 crs = c1.selectbox("Course", ["DMLT", "Radiology", "ECG", "Nursing Assistant"])
-                # Set specific monthly fee for this student
-                m_fee = c1.number_input("Monthly Fee for this Student", value=2500)
+                m_fee = c1.number_input("Standard Monthly Fee for this Student", value=2500)
                 j_date = c2.date_input("Joining Date", datetime.date.today())
                 p_set = c2.text_input("Set Password")
                 addr = st.text_area("Address")
@@ -119,29 +113,41 @@ else:
                 sel_name = st.selectbox("Select Student", list(s_dict.keys()))
                 sel_s = s_dict[sel_name]
                 
-                # --- AUTOMATED FINE CALCULATION (After 10th) ---
-                due_day = 10 
-                today = datetime.date.today()
-                late_fine = 0
-                if today.day > due_day:
-                    days_late = today.day - due_day
-                    late_fine = days_late * 50
-                    st.warning(f"⚠️ {days_late} Days Late. Automated Fine: ₹{late_fine}")
-                else:
-                    st.success("✅ Payment within due date (10th). No fine added.")
-
                 col_a, col_b = st.columns(2)
-                base_amt = col_a.number_input("Base Monthly Fee", value=int(sel_s.get('monthly_fee_amount', 2500)))
-                fine_to_apply = col_a.number_input("Fine to Add", value=late_fine)
-                f_desc = col_b.text_input("For Month/Reason (e.g. May 2026)")
-                mode = col_b.selectbox("Mode", ["Cash", "UPI", "Bank Transfer"])
+                with col_a:
+                    f_cat = st.selectbox("Category", ["Monthly Tuition", "Admission Fee", "Registration Fee", "Examination Fee", "Other"])
+                    
+                # --- AUTOMATED FINE LOGIC (ONLY FOR MONTHLY TUITION) ---
+                late_fine = 0
+                today = datetime.date.today()
+                if f_cat == "Monthly Tuition":
+                    due_day = 10
+                    if today.day > due_day:
+                        days_late = today.day - due_day
+                        late_fine = days_late * 50
+                        st.warning(f"⚠️ Payment is {days_late} Days Late. Automated Fine: ₹{late_fine}")
+                    else:
+                        st.success("✅ Within due date (10th). No fine added.")
+
+                with col_b:
+                    f_desc = st.text_input("Month/Description (e.g. May 2026)")
+                    mode = st.selectbox("Mode", ["Cash", "UPI", "Bank Transfer"])
+
+                # --- DYNAMIC AMOUNT CALCULATION ---
+                if f_cat == "Monthly Tuition":
+                    suggested_base = int(sel_s.get('monthly_fee_amount', 2500))
+                else:
+                    suggested_base = 0 # Admin enters manually for Admission/Exam/Registration
+                
+                base_amt = st.number_input("Amount (Excluding Fine)", value=suggested_base)
+                fine_to_apply = st.number_input("Fine to Add", value=late_fine)
                 
                 total_collected = base_amt + fine_to_apply
                 st.write(f"### Total to Collect: ₹{total_collected}")
                 
                 if st.button("Generate & Save Receipt"):
                     r_id = f"OPI-{datetime.datetime.now().strftime('%y%m%d%H%M%S')}"
-                    desc = f"Monthly Tuition ({f_desc})"
+                    desc = f"{f_cat} ({f_desc})"
                     if fine_to_apply > 0: desc += f" + Late Fine (₹{fine_to_apply})"
                     
                     p_data = {"roll_no": sel_s['roll_no'], "student_name": sel_s['name'], "amount_paid": total_collected, "fee_type": desc, "receipt_no": r_id, "payment_date": str(today), "payment_mode": mode}

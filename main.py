@@ -15,7 +15,7 @@ supabase: Client = create_client(url, key)
 
 st.set_page_config(page_title="OPI Master Portal", layout="wide")
 
-# --- 2. DOCUMENT GENERATORS (ID & Receipt) ---
+# --- 2. DOCUMENT GENERATORS ---
 def create_id_card(student):
     pdf = FPDF(orientation='P', unit='mm', format='A4')
     pdf.add_page()
@@ -56,7 +56,7 @@ def create_fee_receipt(student_name, roll_no, payment):
 
 # --- 3. APP LOGIC ---
 if 'auth' not in st.session_state:
-    st.session_state.update({'auth': False, 'role': None, 'user': None})
+    st.session_state.update({'auth': False, 'role': None, 'user': None, 'edit_mode': False, 'edit_student_id': None})
 
 if not st.session_state.auth:
     st.title("🔐 OPI Master Portal")
@@ -75,14 +75,15 @@ else:
 
     if st.session_state.role == "Admin":
         st.title("👨‍🏫 OPI Admin Control")
-        t1, t2, t3 = st.tabs(["Enroll Student", "Fee Collection", "Master Records & Reminders"])
+        t1, t2, t3 = st.tabs(["Enroll Student", "Fee Collection", "Master Records & Editing"])
         
         with t1:
+            st.subheader("📝 New Enrollment")
             with st.form("enroll", clear_on_submit=True):
                 c1, c2 = st.columns(2)
                 r, n = c1.text_input("Roll No"), c1.text_input("Name")
                 crs = c1.selectbox("Course", ["DMLT", "Radiology", "ECG", "Nursing Assistant"])
-                ph = c1.text_input("WhatsApp Number (with country code, e.g., 919954...)")
+                ph = c1.text_input("WhatsApp Number (e.g., 91...)")
                 m_fee = c2.number_input("Monthly Fee Amount", value=2500)
                 p_set = c2.text_input("Set Password")
                 addr = st.text_area("Address")
@@ -97,14 +98,14 @@ else:
             students = supabase.table("students").select("*").eq("is_active", True).execute().data
             if students:
                 s_dict = {f"{s['name']} (Roll: {s['roll_no']})": s for s in students}
-                sel_name = st.selectbox("Select Student", list(s_dict.keys()))
+                sel_name = st.selectbox("Select Student for Payment", list(s_dict.keys()))
                 sel_s = s_dict[sel_name]
                 
                 late_fine = 0; today = datetime.date.today()
                 f_cat = st.selectbox("Category", ["Monthly Tuition", "Admission Fee", "Registration Fee", "Examination Fee"])
                 if f_cat == "Monthly Tuition" and today.day > 10:
                     late_fine = (today.day - 10) * 50
-                    st.warning(f"⚠️ Fine calculated: ₹{late_fine}")
+                    st.warning(f"⚠️ Late fine calculated: ₹{late_fine}")
 
                 col_a, col_b = st.columns(2)
                 base_amt = col_a.number_input("Base Amount", value=int(sel_s.get('monthly_fee_amount', 2500)) if f_cat == "Monthly Tuition" else 0)
@@ -121,24 +122,50 @@ else:
                     st.download_button("📩 Download PDF", create_fee_receipt(sel_s['name'], sel_s['roll_no'], p_data), f"Rec_{r_id}.pdf")
 
         with t3:
-            st.subheader("📋 Student List & Due Reminders")
+            st.subheader("📋 Student List & Management")
+            
+            # Fetch fresh records
             recs = supabase.table("students").select("*").execute().data
+            
+            # --- EDIT MODAL LOGIC ---
+            if st.session_state.edit_mode:
+                st.warning(f"🛠️ Editing Record for Roll No: {st.session_state.edit_student_id}")
+                # Find the specific student data
+                edit_s = next((item for item in recs if item["roll_no"] == st.session_state.edit_student_id), None)
+                
+                if edit_s:
+                    with st.form("edit_form"):
+                        e_name = st.text_input("Full Name", value=edit_s['name'])
+                        e_course = st.selectbox("Course", ["DMLT", "Radiology", "ECG", "Nursing Assistant"], index=["DMLT", "Radiology", "ECG", "Nursing Assistant"].index(edit_s['course']))
+                        e_phone = st.text_input("Phone", value=edit_s.get('phone', ''))
+                        e_pass = st.text_input("Reset Password", value=edit_s['password'])
+                        e_fee = st.number_input("Monthly Fee Amount", value=int(edit_s.get('monthly_fee_amount', 2500)))
+                        e_addr = st.text_area("Address", value=edit_s.get('address', ''))
+                        
+                        col_save, col_cancel = st.columns(2)
+                        if col_save.form_submit_button("Update Student Data"):
+                            supabase.table("students").update({
+                                "name": e_name, "course": e_course, "phone": e_phone,
+                                "password": e_pass, "monthly_fee_amount": e_fee, "address": e_addr
+                            }).eq("roll_no", edit_s['roll_no']).execute()
+                            st.session_state.edit_mode = False
+                            st.success("Record Updated!")
+                            st.rerun()
+                        if col_cancel.form_submit_button("Cancel"):
+                            st.session_state.edit_mode = False
+                            st.rerun()
+            
+            # --- DISPLAY TABLE ---
             for row in recs:
-                col_name, col_status, col_wa = st.columns([2, 1, 1])
-                col_name.write(f"**{row['name']}** ({row['roll_no']})")
+                col_n, col_p, col_btn = st.columns([2, 1, 1])
+                col_n.write(f"**{row['name']}** ({row['roll_no']})")
+                col_p.write(f"PWD: `{row['password']}`")
                 
-                # WhatsApp Reminder Logic
-                today = datetime.date.today()
-                fine = (today.day - 10) * 50 if today.day > 10 else 0
-                msg = f"Dear {row['name']}, this is a reminder from Oxford Paramedical Institute regarding your fees for {today.strftime('%B %Y')}. "
-                if fine > 0:
-                    msg += f"Your current late fine is ₹{fine}. Please clear it soon to avoid further charges."
-                else:
-                    msg += "Please pay by the 10th to avoid late fines."
-                
-                wa_link = f"https://wa.me/{row.get('phone')}?text={urllib.parse.quote(msg)}"
-                
-                col_wa.markdown(f"[📲 Send WhatsApp Reminder]({wa_link})", unsafe_allow_html=True)
+                # Edit Button triggers edit_mode
+                if col_btn.button("Edit ✏️", key=f"edit_{row['roll_no']}"):
+                    st.session_state.edit_mode = True
+                    st.session_state.edit_student_id = row['roll_no']
+                    st.rerun()
 
     elif st.session_state.role == "Student":
         s = st.session_state.user
@@ -146,7 +173,7 @@ else:
         col1, col2 = st.columns([1, 2])
         with col1:
             if s.get('photo_url'): st.image(s['photo_url'], width=150)
-            st.download_button("🪪 ID Card", create_id_card(s), f"ID_{s['roll_no']}.pdf")
+            st.download_button("🪪 Download ID Card", create_id_card(s), f"ID_{s['roll_no']}.pdf")
         with col2:
             st.subheader("💳 Your Payment Records")
             history = supabase.table("fee_records").select("*").eq("roll_no", s['roll_no']).execute().data

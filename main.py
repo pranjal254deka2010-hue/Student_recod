@@ -18,6 +18,7 @@ st.set_page_config(page_title="OPI Master Portal", layout="wide")
 # --- 2. DOCUMENT GENERATORS ---
 
 def create_id_card(student):
+    # Using 'UTF-8' friendly setup
     pdf = FPDF(orientation='P', unit='mm', format='A4')
     pdf.add_page()
     ox, oy, cw, ch = 10, 10, 85, 55
@@ -42,7 +43,9 @@ def create_id_card(student):
     
     pdf.set_xy(ox + 4, oy + 47); pdf.set_font("Arial", 'B', 7); pdf.cell(18, 4, "ADDRESS:", 0)
     pdf.set_font("Arial", '', 6); pdf.set_xy(ox + 22, oy + 47); pdf.multi_cell(40, 3, str(student.get('address', 'N/A')))
-    return pdf.output(dest='S').encode('latin-1')
+    
+    # Clean export to avoid encoding errors
+    return pdf.output(dest='S').encode('latin-1', 'replace')
 
 def create_fee_receipt(student_name, roll_no, payment):
     pdf = FPDF(orientation='P', unit='mm', format='A4')
@@ -55,27 +58,28 @@ def create_fee_receipt(student_name, roll_no, payment):
     
     pdf.set_text_color(0, 0, 0); pdf.set_xy(10, 50); pdf.set_font("Arial", 'B', 14)
     pdf.cell(0, 10, "OFFICIAL MONEY RECEIPT", ln=True, align='C')
-    pdf.set_font("Arial", '', 11); pdf.cell(95, 8, f"Receipt No: {payment['receipt_no']}")
-    pdf.cell(95, 8, f"Date: {payment['payment_date']}", ln=True, align='R')
+    pdf.set_font("Arial", '', 11); pdf.cell(95, 8, f"Receipt No: {payment['receipt_no']}"); pdf.cell(95, 8, f"Date: {payment['payment_date']}", ln=True, align='R')
     
     pdf.ln(10); pdf.set_fill_color(240, 240, 240); pdf.set_font("Arial", 'B', 10)
     pdf.cell(130, 10, "Description / Particulars", border=1, fill=True)
     pdf.cell(60, 10, "Amount (INR)", border=1, fill=True, align='C', ln=True)
     
+    # Using 'Rs.' instead of the symbol '₹' to prevent the Unicode error
     pdf.set_font("Arial", '', 11)
-    pdf.cell(130, 20, f"Fees for {student_name} - {payment['fee_type']}", border=1)
+    desc_text = f"Fees for {student_name} - {payment['fee_type']}"
+    pdf.cell(130, 20, desc_text, border=1)
     pdf.cell(60, 20, f"Rs. {payment['amount_paid']}/-", border=1, align='C', ln=True)
     
-    # Signature Placement
     if os.path.exists("signature.png"):
         pdf.image("signature.png", x=145, y=105, h=30)
     
     pdf.set_xy(140, 140); pdf.set_font("Arial", 'B', 10)
     pdf.cell(50, 5, "Authorized Signatory", border='T', align='C')
     
-    return pdf.output(dest='S').encode('latin-1')
+    # FINAL FIX: Using 'latin-1' with 'replace' to drop any hidden characters causing the crash
+    return pdf.output(dest='S').encode('latin-1', 'replace')
 
-# --- 3. AUTHENTICATION ---
+# --- 3. APP LOGIC ---
 if 'auth' not in st.session_state:
     st.session_state.update({'auth': False, 'role': None, 'user': None, 'edit_mode': False, 'edit_student_id': None})
 
@@ -128,7 +132,7 @@ else:
                 f_cat = st.selectbox("Category", ["Monthly Tuition", "Admission Fee", "Registration Fee", "Examination Fee"])
                 if f_cat == "Monthly Tuition" and today.day > 10:
                     late_fine = (today.day - 10) * 50
-                    st.warning(f"⚠️ Late fine calculated: ₹{late_fine}")
+                    st.warning(f"⚠️ Fine calculated: ₹{late_fine}")
 
                 col_a, col_b = st.columns(2)
                 base_amt = col_a.number_input("Base Amount", value=int(sel_s.get('monthly_fee_amount', 2500)) if f_cat == "Monthly Tuition" else 0)
@@ -139,11 +143,13 @@ else:
                 if st.button("Generate Receipt"):
                     r_id = f"OPI-{datetime.datetime.now().strftime('%y%m%d%H%M%S')}"
                     desc = f"{f_cat} ({f_desc})"
-                    if fine_to_apply > 0: desc += f" + Fine (₹{fine_to_apply})"
+                    if fine_to_apply > 0: desc += f" + Fine (Rs. {fine_to_apply})"
                     p_data = {"roll_no": sel_s['roll_no'], "student_name": sel_s['name'], "amount_paid": base_amt + fine_to_apply, "fee_type": desc, "receipt_no": r_id, "payment_date": str(today), "payment_mode": mode}
                     supabase.table("fee_records").insert(p_data).execute()
-                    # IMMEDIATE DOWNLOAD FOR ADMIN
-                    st.download_button("📩 Download PDF", create_fee_receipt(sel_s['name'], sel_s['roll_no'], p_data), f"Rec_{r_id}.pdf")
+                    
+                    # RE-RENDER THE RECEIPT
+                    pdf_data = create_fee_receipt(sel_s['name'], sel_s['roll_no'], p_data)
+                    st.download_button("📩 Download PDF", pdf_data, f"Rec_{r_id}.pdf")
 
         with t3:
             st.subheader("📋 OPI Database & Management")
@@ -181,19 +187,14 @@ else:
             st.download_button("🪪 ID Card", create_id_card(s), f"ID_{s['roll_no']}.pdf")
         with col2:
             st.subheader("💳 Your Payment History")
-            # Pulling receipts specifically for this roll number
             history = supabase.table("fee_records").select("*").eq("roll_no", str(s['roll_no'])).execute().data
             if history:
                 for p in history:
-                    with st.container():
-                        st.write(f"**{p['fee_type']}** | ₹{p['amount_paid']} | {p['payment_date']}")
-                        # KEY FIX: The receipt generation was sometimes failing inside a loop.
-                        # We use a unique key for every download button.
-                        st.download_button(
-                            label=f"📄 Download Receipt ({p['receipt_no']})", 
-                            data=create_fee_receipt(s['name'], s['roll_no'], p), 
-                            file_name=f"OPI_Rec_{p['receipt_no']}.pdf",
-                            key=f"dl_{p['receipt_no']}"
-                        )
-                        st.divider()
-            else: st.info("No payment records found.")
+                    st.write(f"**{p['fee_type']}** | Rs. {p['amount_paid']} | {p['payment_date']}")
+                    st.download_button(
+                        label=f"📄 Receipt {p['receipt_no']}", 
+                        data=create_fee_receipt(s['name'], s['roll_no'], p), 
+                        file_name=f"OPI_Rec_{p['receipt_no']}.pdf",
+                        key=f"dl_st_{p['receipt_no']}"
+                    )
+                    st.divider()

@@ -1,84 +1,70 @@
 import streamlit as st
-from streamlit_gsheets import GSheetsConnection
-import pandas as pd
+from supabase import create_client, Client
 
-# --- 1. CONFIG & CONNECTION ---
-st.set_page_config(page_title="OPI Master System", layout="wide")
+# --- 1. CONNECTION ---
+url = st.secrets["SUPABASE_URL"]
+key = st.secrets["SUPABASE_KEY"]
+supabase: Client = create_client(url, key)
 
-# This connects to the URL we will put in 'Secrets'
-conn = st.connection("gsheets", type=GSheetsConnection)
+st.set_page_config(page_title="OPI Master Portal", layout="wide")
 
-# --- 2. AUTHENTICATION STATE ---
-if 'auth_state' not in st.session_state:
-    st.session_state.update({'auth_state': False, 'role': None, 'user_data': None})
+# --- 2. AUTHENTICATION ---
+if 'auth' not in st.session_state:
+    st.session_state.update({'auth': False, 'role': None, 'user': None})
 
-def login_logic(user, pw):
-    if user == "admin" and pw == "opi2026":
-        st.session_state.update({'auth_state': True, 'role': 'Admin', 'user_data': 'Admin'})
+def login(u, p):
+    if u == "admin" and p == "opi2026":
+        st.session_state.update({'auth': True, 'role': 'Admin'})
         return True
     
-    # Read from Google Sheets
-    df = conn.read(worksheet="students")
-    df['Roll_No'] = df['Roll_No'].astype(str)
-    df['Password'] = df['Password'].astype(str)
-    
-    user_match = df[(df['Roll_No'] == user) & (df['Password'] == pw)]
-    if not user_match.empty:
-        st.session_state.update({'auth_state': True, 'role': 'Student', 'user_data': user_match.iloc[0]})
+    # Check Supabase Table
+    res = supabase.table("students").select("*").eq("roll_no", u).eq("password", p).execute()
+    if res.data:
+        st.session_state.update({'auth': True, 'role': 'Student', 'user': res.data[0]})
         return True
     return False
 
-# --- 3. UI - LOGIN ---
-if not st.session_state.auth_state:
-    st.markdown("<h2 style='text-align: center;'>OPI Master Portal</h2>", unsafe_allow_html=True)
-    with st.container():
-        u = st.text_input("Username")
-        p = st.text_input("Password", type="password")
-        if st.button("Access System"):
-            if login_logic(u, p):
-                st.rerun()
-            else:
-                st.error("Invalid Login")
-
-# --- 4. UI - AUTHORIZED AREA ---
+# --- 3. UI ---
+if not st.session_state.auth:
+    st.title("🔐 OPI Portal Login")
+    u = st.text_input("Roll Number / Admin")
+    p = st.text_input("Password", type="password")
+    if st.button("Access Portal"):
+        if login(u, p): st.rerun()
+        else: st.error("Login Failed")
 else:
     st.sidebar.title(f"Role: {st.session_state.role}")
     if st.sidebar.button("Logout"):
-        st.session_state.update({'auth_state': False, 'role': None, 'user_data': None})
+        st.session_state.auth = False
         st.rerun()
 
     if st.session_state.role == "Admin":
-        menu = st.sidebar.radio("Navigation", ["Registration", "Records"])
+        st.title("👨‍🏫 Admin Dashboard")
+        tab1, tab2 = st.tabs(["Register Student", "Master Records"])
         
-        if menu == "Registration":
-            st.title("📝 Permanent Registration")
+        with tab1:
             with st.form("reg"):
-                # Form fields
-                r = st.text_input("Roll Number")
+                r = st.text_input("Roll No")
                 n = st.text_input("Full Name")
-                c = st.selectbox("Course", ["DMLT", "ICU", "ECG"])
+                c = st.selectbox("Course", ["DMLT", "Radiology", "ECG"])
                 ph = st.text_input("Phone")
-                bg = st.selectbox("Blood Group", ["A+", "B+", "O+", "AB+"])
-                sess = st.text_input("Session")
-                addr = st.text_area("Address")
-                p_set = st.text_input("Password")
-                
-                if st.form_submit_button("Save to Google Drive"):
-                    # Fetch current data
-                    df = conn.read(worksheet="students")
-                    new_data = pd.DataFrame([[r, n, c, ph, bg, sess, addr, p_set]], columns=df.columns)
-                    updated_df = pd.concat([df, new_data], ignore_index=True)
-                    
-                    # Push back to Google Sheets
-                    conn.update(worksheet="students", data=updated_df)
-                    st.success("Saved permanently!")
-
-        elif menu == "Records":
-            st.title("📋 Live Master List")
-            df = conn.read(worksheet="students")
-            st.dataframe(df)
+                pwd = st.text_input("Set Password")
+                if st.form_submit_button("Save to Cloud"):
+                    data = {"roll_no": r, "name": n, "course": c, "phone": ph, "password": pwd}
+                    supabase.table("students").insert(data).execute()
+                    st.success("Student Saved Permanently!")
+        
+        with tab2:
+            res = supabase.table("students").select("*").execute()
+            if res.data:
+                st.dataframe(res.data)
+            else:
+                st.write("No students registered yet.")
 
     elif st.session_state.role == "Student":
-        data = st.session_state.user_data
-        st.title(f"🎓 Student Dashboard: {data['Name']}")
-        st.write(f"Roll: {data['Roll_No']} | Course: {data['Course']}")
+        s = st.session_state.user
+        st.title(f"👋 Welcome, {s['name']}")
+        st.subheader("Your Academic Record")
+        st.write(f"**Course:** {s['course']}")
+        st.write(f"**Roll No:** {s['roll_no']}")
+        st.info("Download buttons for ID cards will appear here soon.")

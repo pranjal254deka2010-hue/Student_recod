@@ -15,10 +15,18 @@ supabase: Client = create_client(url, key)
 
 st.set_page_config(page_title="OPI Master Portal", layout="wide")
 
-# --- 2. DOCUMENT GENERATORS ---
+# --- 2. HELPER TO CLEAN TEXT (Prevents Encoding Crashes) ---
+def clean_for_pdf(text):
+    """Replaces the Rupee symbol and other non-latin characters for PDF safety."""
+    if not text: return ""
+    # Replace the Rupee symbol if it exists in the database string
+    text = str(text).replace("₹", "Rs. ")
+    # Encode and decode to strip out any other weird characters
+    return text.encode('ascii', 'ignore').decode('ascii')
+
+# --- 3. DOCUMENT GENERATORS ---
 
 def create_id_card(student):
-    # Using 'UTF-8' friendly setup
     pdf = FPDF(orientation='P', unit='mm', format='A4')
     pdf.add_page()
     ox, oy, cw, ch = 10, 10, 85, 55
@@ -26,7 +34,7 @@ def create_id_card(student):
     pdf.set_fill_color(0, 51, 102); pdf.rect(ox, oy, cw, 12, 'F')
     if os.path.exists("logo.png"): pdf.image("logo.png", x=ox + 2, y=oy + 1.5, h=9)
     pdf.set_text_color(255, 255, 255); pdf.set_font("Arial", 'B', 9); pdf.set_xy(ox + 12, oy + 4)
-    pdf.cell(cw - 12, 4, "OXFORD PARAMEDICAL INSTITUTE", ln=True, align='L')
+    pdf.cell(cw - 12, 4, clean_for_pdf("OXFORD PARAMEDICAL INSTITUTE"), ln=True, align='L')
     
     photo_data = student.get('photo_url', "")
     if photo_data and "base64," in str(photo_data):
@@ -39,12 +47,10 @@ def create_id_card(student):
     y = oy + 18
     for lbl, val in fields:
         pdf.set_xy(ox + 4, y); pdf.cell(18, 5, lbl); pdf.set_font("Arial", '', 8)
-        pdf.cell(40, 5, str(val if val else "N/A").upper(), ln=True); y += 6; pdf.set_font("Arial", 'B', 8)
+        pdf.cell(40, 5, clean_for_pdf(val).upper(), ln=True); y += 6; pdf.set_font("Arial", 'B', 8)
     
     pdf.set_xy(ox + 4, oy + 47); pdf.set_font("Arial", 'B', 7); pdf.cell(18, 4, "ADDRESS:", 0)
-    pdf.set_font("Arial", '', 6); pdf.set_xy(ox + 22, oy + 47); pdf.multi_cell(40, 3, str(student.get('address', 'N/A')))
-    
-    # Clean export to avoid encoding errors
+    pdf.set_font("Arial", '', 6); pdf.set_xy(ox + 22, oy + 47); pdf.multi_cell(40, 3, clean_for_pdf(student.get('address', 'N/A')))
     return pdf.output(dest='S').encode('latin-1', 'replace')
 
 def create_fee_receipt(student_name, roll_no, payment):
@@ -53,8 +59,8 @@ def create_fee_receipt(student_name, roll_no, payment):
     pdf.set_fill_color(0, 51, 102); pdf.rect(10, 10, 190, 32, 'F')
     if os.path.exists("logo.png"): pdf.image("logo.png", x=15, y=12, h=28)
     pdf.set_text_color(255, 255, 255); pdf.set_xy(50, 15); pdf.set_font("Arial", 'B', 18)
-    pdf.cell(0, 8, "OXFORD PARAMEDICAL INSTITUTE", ln=True)
-    pdf.set_font("Arial", '', 11); pdf.set_x(50); pdf.cell(0, 6, "Near Daily Bazar, Dhupdhara 783123", ln=True)
+    pdf.cell(0, 8, clean_for_pdf("OXFORD PARAMEDICAL INSTITUTE"), ln=True)
+    pdf.set_font("Arial", '', 11); pdf.set_x(50); pdf.cell(0, 6, clean_for_pdf("Near Daily Bazar, Dhupdhara 783123"), ln=True)
     
     pdf.set_text_color(0, 0, 0); pdf.set_xy(10, 50); pdf.set_font("Arial", 'B', 14)
     pdf.cell(0, 10, "OFFICIAL MONEY RECEIPT", ln=True, align='C')
@@ -64,9 +70,8 @@ def create_fee_receipt(student_name, roll_no, payment):
     pdf.cell(130, 10, "Description / Particulars", border=1, fill=True)
     pdf.cell(60, 10, "Amount (INR)", border=1, fill=True, align='C', ln=True)
     
-    # Using 'Rs.' instead of the symbol '₹' to prevent the Unicode error
     pdf.set_font("Arial", '', 11)
-    desc_text = f"Fees for {student_name} - {payment['fee_type']}"
+    desc_text = f"Fees for {clean_for_pdf(student_name)} - {clean_for_pdf(payment['fee_type'])}"
     pdf.cell(130, 20, desc_text, border=1)
     pdf.cell(60, 20, f"Rs. {payment['amount_paid']}/-", border=1, align='C', ln=True)
     
@@ -76,10 +81,9 @@ def create_fee_receipt(student_name, roll_no, payment):
     pdf.set_xy(140, 140); pdf.set_font("Arial", 'B', 10)
     pdf.cell(50, 5, "Authorized Signatory", border='T', align='C')
     
-    # FINAL FIX: Using 'latin-1' with 'replace' to drop any hidden characters causing the crash
     return pdf.output(dest='S').encode('latin-1', 'replace')
 
-# --- 3. APP LOGIC ---
+# --- 4. APP LOGIC ---
 if 'auth' not in st.session_state:
     st.session_state.update({'auth': False, 'role': None, 'user': None, 'edit_mode': False, 'edit_student_id': None})
 
@@ -132,7 +136,7 @@ else:
                 f_cat = st.selectbox("Category", ["Monthly Tuition", "Admission Fee", "Registration Fee", "Examination Fee"])
                 if f_cat == "Monthly Tuition" and today.day > 10:
                     late_fine = (today.day - 10) * 50
-                    st.warning(f"⚠️ Fine calculated: ₹{late_fine}")
+                    st.warning(f"⚠️ Fine calculated: Rs. {late_fine}")
 
                 col_a, col_b = st.columns(2)
                 base_amt = col_a.number_input("Base Amount", value=int(sel_s.get('monthly_fee_amount', 2500)) if f_cat == "Monthly Tuition" else 0)
@@ -146,10 +150,7 @@ else:
                     if fine_to_apply > 0: desc += f" + Fine (Rs. {fine_to_apply})"
                     p_data = {"roll_no": sel_s['roll_no'], "student_name": sel_s['name'], "amount_paid": base_amt + fine_to_apply, "fee_type": desc, "receipt_no": r_id, "payment_date": str(today), "payment_mode": mode}
                     supabase.table("fee_records").insert(p_data).execute()
-                    
-                    # RE-RENDER THE RECEIPT
-                    pdf_data = create_fee_receipt(sel_s['name'], sel_s['roll_no'], p_data)
-                    st.download_button("📩 Download PDF", pdf_data, f"Rec_{r_id}.pdf")
+                    st.download_button("📩 Download PDF", create_fee_receipt(sel_s['name'], sel_s['roll_no'], p_data), f"Rec_{r_id}.pdf")
 
         with t3:
             st.subheader("📋 OPI Database & Management")
@@ -190,7 +191,8 @@ else:
             history = supabase.table("fee_records").select("*").eq("roll_no", str(s['roll_no'])).execute().data
             if history:
                 for p in history:
-                    st.write(f"**{p['fee_type']}** | Rs. {p['amount_paid']} | {p['payment_date']}")
+                    # Cleaned display on screen
+                    st.write(f"**{clean_for_pdf(p['fee_type'])}** | Rs. {p['amount_paid']} | {p['payment_date']}")
                     st.download_button(
                         label=f"📄 Receipt {p['receipt_no']}", 
                         data=create_fee_receipt(s['name'], s['roll_no'], p), 

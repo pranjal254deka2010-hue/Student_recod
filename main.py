@@ -6,6 +6,7 @@ from io import BytesIO
 from PIL import Image
 import os
 import datetime
+import urllib.parse
 
 # --- 1. DATABASE CONNECTION ---
 url = st.secrets["SUPABASE_URL"]
@@ -14,8 +15,7 @@ supabase: Client = create_client(url, key)
 
 st.set_page_config(page_title="OPI Master Portal", layout="wide")
 
-# --- 2. DOCUMENT GENERATORS ---
-
+# --- 2. DOCUMENT GENERATORS (ID & Receipt) ---
 def create_id_card(student):
     pdf = FPDF(orientation='P', unit='mm', format='A4')
     pdf.add_page()
@@ -23,21 +23,17 @@ def create_id_card(student):
     pdf.set_draw_color(0, 51, 102); pdf.rect(ox, oy, cw, ch)
     pdf.set_fill_color(0, 51, 102); pdf.rect(ox, oy, cw, 12, 'F')
     if os.path.exists("logo.png"): pdf.image("logo.png", x=ox + 2, y=oy + 1.5, h=9)
-    pdf.set_text_color(255, 255, 255); pdf.set_font("Arial", 'B', 9); pdf.set_xy(ox + 12, oy + 2.5) 
+    pdf.set_text_color(255, 255, 255); pdf.set_font("Arial", 'B', 9); pdf.set_xy(ox + 12, oy + 4)
     pdf.cell(cw - 12, 4, "OXFORD PARAMEDICAL INSTITUTE", ln=True, align='L')
-    pdf.set_font("Arial", '', 6); pdf.set_xy(ox + 12, oy + 7); pdf.cell(cw - 12, 3, "Near Daily Bazar, Dhupdhara 783123", ln=True, align='L')
-    
     photo_data = student.get('photo_url', "")
     if photo_data and "base64," in str(photo_data):
         try: pdf.image(BytesIO(base64.b64decode(photo_data.split(",")[1])), x=ox + 62, y=oy + 15, w=18, h=22)
         except: pdf.rect(ox + 62, oy + 15, 18, 22)
-    
     pdf.set_text_color(0, 0, 0); pdf.set_font("Arial", 'B', 8)
     fields = [("NAME:", student.get('name')), ("ROLL NO:", student.get('roll_no')), ("COURSE:", student.get('course'))]
     y = oy + 18
     for lbl, val in fields:
         pdf.set_xy(ox + 4, y); pdf.cell(18, 5, lbl); pdf.set_font("Arial", '', 8); pdf.cell(40, 5, str(val).upper(), ln=True); y += 6; pdf.set_font("Arial", 'B', 8)
-    
     pdf.set_xy(ox + 4, oy + 47); pdf.set_font("Arial", 'B', 7); pdf.cell(18, 4, "ADDRESS:", 0)
     pdf.set_font("Arial", '', 6); pdf.set_xy(ox + 22, oy + 47); pdf.multi_cell(40, 3, str(student.get('address', 'N/A')))
     return pdf.output(dest='S').encode('latin-1')
@@ -50,19 +46,10 @@ def create_fee_receipt(student_name, roll_no, payment):
     pdf.set_text_color(255, 255, 255); pdf.set_xy(50, 15); pdf.set_font("Arial", 'B', 18)
     pdf.cell(0, 8, "OXFORD PARAMEDICAL INSTITUTE", ln=True)
     pdf.set_font("Arial", '', 11); pdf.set_x(50); pdf.cell(0, 6, "Near Daily Bazar, Dhupdhara 783123", ln=True)
-    
-    pdf.set_text_color(0, 0, 0); pdf.set_xy(10, 50); pdf.set_font("Arial", 'B', 14)
-    pdf.cell(0, 10, "OFFICIAL MONEY RECEIPT", ln=True, align='C')
-    pdf.set_font("Arial", '', 11); pdf.cell(95, 8, f"Receipt No: {payment['receipt_no']}")
-    pdf.cell(95, 8, f"Date: {payment['payment_date']}", ln=True, align='R')
-    
-    pdf.ln(10); pdf.set_fill_color(240, 240, 240); pdf.set_font("Arial", 'B', 10)
-    pdf.cell(130, 10, "Description / Particulars", border=1, fill=True)
-    pdf.cell(60, 10, "Amount (INR)", border=1, fill=True, align='C', ln=True)
-    pdf.set_font("Arial", '', 11)
-    pdf.cell(130, 20, f"Fees for {student_name} - {payment['fee_type']}", border=1)
-    pdf.cell(60, 20, f"Rs. {payment['amount_paid']}/-", border=1, align='C', ln=True)
-    
+    pdf.set_text_color(0, 0, 0); pdf.set_xy(10, 50); pdf.set_font("Arial", 'B', 14); pdf.cell(0, 10, "OFFICIAL MONEY RECEIPT", ln=True, align='C')
+    pdf.set_font("Arial", '', 11); pdf.cell(95, 8, f"Receipt No: {payment['receipt_no']}"); pdf.cell(95, 8, f"Date: {payment['payment_date']}", ln=True, align='R')
+    pdf.ln(10); pdf.set_fill_color(240, 240, 240); pdf.set_font("Arial", 'B', 10); pdf.cell(130, 10, "Description", border=1, fill=True); pdf.cell(60, 10, "Amount (INR)", border=1, fill=True, align='C', ln=True)
+    pdf.set_font("Arial", '', 11); pdf.cell(130, 20, f"Fees for {student_name} - {payment['fee_type']}", border=1); pdf.cell(60, 20, f"Rs. {payment['amount_paid']}/-", border=1, align='C', ln=True)
     if os.path.exists("signature.png"): pdf.image("signature.png", x=145, y=110, h=30)
     pdf.set_xy(140, 145); pdf.set_font("Arial", 'B', 10); pdf.cell(50, 5, "Authorized Signatory", border='T', align='C')
     return pdf.output(dest='S').encode('latin-1')
@@ -88,76 +75,70 @@ else:
 
     if st.session_state.role == "Admin":
         st.title("👨‍🏫 OPI Admin Control")
-        t1, t2, t3 = st.tabs(["Enroll Student", "Fee Collection & Fines", "Master Records"])
+        t1, t2, t3 = st.tabs(["Enroll Student", "Fee Collection", "Master Records & Reminders"])
         
         with t1:
             with st.form("enroll", clear_on_submit=True):
                 c1, c2 = st.columns(2)
                 r, n = c1.text_input("Roll No"), c1.text_input("Name")
                 crs = c1.selectbox("Course", ["DMLT", "Radiology", "ECG", "Nursing Assistant"])
-                m_fee = c1.number_input("Standard Monthly Fee for this Student", value=2500)
-                j_date = c2.date_input("Joining Date", datetime.date.today())
+                ph = c1.text_input("WhatsApp Number (with country code, e.g., 919954...)")
+                m_fee = c2.number_input("Monthly Fee Amount", value=2500)
                 p_set = c2.text_input("Set Password")
                 addr = st.text_area("Address")
                 up = st.file_uploader("Photo", type=['jpg', 'png'])
                 if st.form_submit_button("Save Student"):
                     img = f"data:image/png;base64,{base64.b64encode(up.getvalue()).decode()}" if up else ""
-                    supabase.table("students").insert({"roll_no": r, "name": n, "course": crs, "joining_date": str(j_date), "password": p_set, "photo_url": img, "is_active": True, "monthly_fee_amount": m_fee, "address": addr}).execute()
+                    supabase.table("students").insert({"roll_no": r, "name": n, "course": crs, "password": p_set, "photo_url": img, "is_active": True, "monthly_fee_amount": m_fee, "address": addr, "phone": ph}).execute()
                     st.success("Registration Successful!")
 
         with t2:
-            st.subheader("💰 Smart Fee & Fine Ledger")
+            st.subheader("💰 Smart Fee Collection")
             students = supabase.table("students").select("*").eq("is_active", True).execute().data
             if students:
                 s_dict = {f"{s['name']} (Roll: {s['roll_no']})": s for s in students}
                 sel_name = st.selectbox("Select Student", list(s_dict.keys()))
                 sel_s = s_dict[sel_name]
                 
+                late_fine = 0; today = datetime.date.today()
+                f_cat = st.selectbox("Category", ["Monthly Tuition", "Admission Fee", "Registration Fee", "Examination Fee"])
+                if f_cat == "Monthly Tuition" and today.day > 10:
+                    late_fine = (today.day - 10) * 50
+                    st.warning(f"⚠️ Fine calculated: ₹{late_fine}")
+
                 col_a, col_b = st.columns(2)
-                with col_a:
-                    f_cat = st.selectbox("Category", ["Monthly Tuition", "Admission Fee", "Registration Fee", "Examination Fee", "Other"])
-                    
-                # --- AUTOMATED FINE LOGIC (ONLY FOR MONTHLY TUITION) ---
-                late_fine = 0
-                today = datetime.date.today()
-                if f_cat == "Monthly Tuition":
-                    due_day = 10
-                    if today.day > due_day:
-                        days_late = today.day - due_day
-                        late_fine = days_late * 50
-                        st.warning(f"⚠️ Payment is {days_late} Days Late. Automated Fine: ₹{late_fine}")
-                    else:
-                        st.success("✅ Within due date (10th). No fine added.")
-
-                with col_b:
-                    f_desc = st.text_input("Month/Description (e.g. May 2026)")
-                    mode = st.selectbox("Mode", ["Cash", "UPI", "Bank Transfer"])
-
-                # --- DYNAMIC AMOUNT CALCULATION ---
-                if f_cat == "Monthly Tuition":
-                    suggested_base = int(sel_s.get('monthly_fee_amount', 2500))
-                else:
-                    suggested_base = 0 # Admin enters manually for Admission/Exam/Registration
+                base_amt = col_a.number_input("Base Amount", value=int(sel_s.get('monthly_fee_amount', 2500)) if f_cat == "Monthly Tuition" else 0)
+                fine_to_apply = col_a.number_input("Fine to Add", value=late_fine)
+                f_desc = col_b.text_input("Month/Description")
+                mode = col_b.selectbox("Mode", ["Cash", "UPI", "Bank"])
                 
-                base_amt = st.number_input("Amount (Excluding Fine)", value=suggested_base)
-                fine_to_apply = st.number_input("Fine to Add", value=late_fine)
-                
-                total_collected = base_amt + fine_to_apply
-                st.write(f"### Total to Collect: ₹{total_collected}")
-                
-                if st.button("Generate & Save Receipt"):
+                if st.button("Generate Receipt"):
                     r_id = f"OPI-{datetime.datetime.now().strftime('%y%m%d%H%M%S')}"
                     desc = f"{f_cat} ({f_desc})"
-                    if fine_to_apply > 0: desc += f" + Late Fine (₹{fine_to_apply})"
-                    
-                    p_data = {"roll_no": sel_s['roll_no'], "student_name": sel_s['name'], "amount_paid": total_collected, "fee_type": desc, "receipt_no": r_id, "payment_date": str(today), "payment_mode": mode}
+                    if fine_to_apply > 0: desc += f" + Fine (₹{fine_to_apply})"
+                    p_data = {"roll_no": sel_s['roll_no'], "student_name": sel_s['name'], "amount_paid": base_amt + fine_to_apply, "fee_type": desc, "receipt_no": r_id, "payment_date": str(today), "payment_mode": mode}
                     supabase.table("fee_records").insert(p_data).execute()
-                    st.download_button("📩 Download Receipt", create_fee_receipt(sel_s['name'], sel_s['roll_no'], p_data), f"Rec_{r_id}.pdf")
+                    st.download_button("📩 Download PDF", create_fee_receipt(sel_s['name'], sel_s['roll_no'], p_data), f"Rec_{r_id}.pdf")
 
         with t3:
-            st.subheader("📋 Student Directory")
+            st.subheader("📋 Student List & Due Reminders")
             recs = supabase.table("students").select("*").execute().data
-            st.dataframe(recs)
+            for row in recs:
+                col_name, col_status, col_wa = st.columns([2, 1, 1])
+                col_name.write(f"**{row['name']}** ({row['roll_no']})")
+                
+                # WhatsApp Reminder Logic
+                today = datetime.date.today()
+                fine = (today.day - 10) * 50 if today.day > 10 else 0
+                msg = f"Dear {row['name']}, this is a reminder from Oxford Paramedical Institute regarding your fees for {today.strftime('%B %Y')}. "
+                if fine > 0:
+                    msg += f"Your current late fine is ₹{fine}. Please clear it soon to avoid further charges."
+                else:
+                    msg += "Please pay by the 10th to avoid late fines."
+                
+                wa_link = f"https://wa.me/{row.get('phone')}?text={urllib.parse.quote(msg)}"
+                
+                col_wa.markdown(f"[📲 Send WhatsApp Reminder]({wa_link})", unsafe_allow_html=True)
 
     elif st.session_state.role == "Student":
         s = st.session_state.user
@@ -171,6 +152,5 @@ else:
             history = supabase.table("fee_records").select("*").eq("roll_no", s['roll_no']).execute().data
             if history:
                 for p in history:
-                    c_a, c_b = st.columns([3, 1])
-                    c_a.write(f"**{p['fee_type']}** | ₹{p['amount_paid']} | {p['payment_date']}")
-                    c_b.download_button("📄 Receipt", create_fee_receipt(s['name'], s['roll_no'], p), f"Rec_{p['receipt_no']}.pdf", key=p['receipt_no'])
+                    st.write(f"**{p['fee_type']}** | ₹{p['amount_paid']} | {p['payment_date']}")
+                    st.download_button("📄 Receipt", create_fee_receipt(s['name'], s['roll_no'], p), f"Rec_{p['receipt_no']}.pdf", key=p['receipt_no'])

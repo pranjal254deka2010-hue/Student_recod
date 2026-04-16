@@ -94,15 +94,17 @@ def create_fee_receipt(student_name, roll_no, payment):
     pdf.set_font("Arial", 'I', 10)
     pdf.cell(0, 10, f"Payment Mode: {payment['payment_mode']}", ln=True)
     
+    # --- BIGGER SIGNATURE SECTION ---
     if os.path.exists("signature.png"):
-        pdf.image("signature.png", x=150, y=105, h=15)
+        # Height increased to 25 and Y moved up to 95 to accommodate size
+        pdf.image("signature.png", x=145, y=95, h=25)
     
     pdf.set_xy(140, 120); pdf.set_font("Arial", 'B', 10)
     pdf.cell(50, 5, "Authorized Signatory", border='T', align='C')
     
     return pdf.output(dest='S').encode('latin-1')
 
-# --- 3. AUTHENTICATION & APP LOGIC (Remains the same) ---
+# --- 3. AUTHENTICATION & APP LOGIC ---
 if 'auth' not in st.session_state:
     st.session_state.update({'auth': False, 'role': None, 'user': None})
 

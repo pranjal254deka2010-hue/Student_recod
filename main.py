@@ -4,6 +4,7 @@ from fpdf import FPDF
 import base64
 from io import BytesIO
 from PIL import Image
+import os
 
 # --- 1. DATABASE CONNECTION ---
 url = st.secrets["SUPABASE_URL"]
@@ -12,32 +13,35 @@ supabase: Client = create_client(url, key)
 
 st.set_page_config(page_title="OPI Master Portal", layout="wide")
 
-# --- 2. ID CARD GENERATOR (A4 FORMAT WITH PHOTO) ---
+# --- 2. ID CARD GENERATOR (A4 FORMAT) ---
 def create_id_card(student):
-    # A4 Page setup
     pdf = FPDF(orientation='P', unit='mm', format='A4')
     pdf.add_page()
     
-    ox, oy = 10, 10 # Position on the A4 page
+    ox, oy = 10, 10 # Top-left position
     cw, ch = 85, 55 # ID Card size
     
-    # Border & Navy Blue Header
-    pdf.set_draw_color(0, 51, 102)
+    # Border & Header
+    pdf.set_draw_color(0, 51, 102) # OPI Navy Blue
     pdf.set_line_width(0.5)
     pdf.rect(ox, oy, cw, ch)
     pdf.set_fill_color(0, 51, 102)
     pdf.rect(ox, oy, cw, 12, 'F')
     
+    # LOGO (Top Left)
+    if os.path.exists("logo.png"):
+        pdf.image("logo.png", x=ox + 2, y=oy + 1.5, h=9)
+    
     # Header Text
     pdf.set_text_color(255, 255, 255)
-    pdf.set_font("Arial", 'B', 10)
-    pdf.set_xy(ox, oy + 2)
-    pdf.cell(cw, 5, "OXFORD PARAMEDICAL INSTITUTE", ln=True, align='C')
+    pdf.set_font("Arial", 'B', 9)
+    pdf.set_xy(ox + 12, oy + 2)
+    pdf.cell(cw - 12, 5, "OXFORD PARAMEDICAL INSTITUTE", ln=True, align='L')
     pdf.set_font("Arial", '', 6)
-    pdf.set_xy(ox, oy + 7)
-    pdf.cell(cw, 3, "GUWAHATI | DHUPDHARA, ASSAM", ln=True, align='C')
+    pdf.set_xy(ox + 12, oy + 7)
+    pdf.cell(cw - 12, 3, "GUWAHATI | DHUPDHARA, ASSAM", ln=True, align='L')
     
-    # Handle Photo from Database (Base64)
+    # PHOTO PROCESSING
     photo_data = student.get('photo_url')
     if photo_data and "base64," in photo_data:
         try:
@@ -53,7 +57,7 @@ def create_id_card(student):
         pdf.set_draw_color(200, 200, 200)
         pdf.rect(ox + 62, oy + 15, 18, 22)
 
-    # Student Details
+    # DETAILS
     pdf.set_text_color(0, 0, 0)
     def add_line(label, value, y_add):
         pdf.set_xy(ox + 4, oy + y_add)
@@ -68,25 +72,25 @@ def create_id_card(student):
     add_line("SESSION:", student.get('session', 'N/A'), 36)
     add_line("B. GROUP:", student.get('blood_group', 'N/A'), 42)
     
-    # Address
-    pdf.set_xy(ox + 4, oy + 48)
+    # ADDRESS
+    pdf.set_xy(ox + 4, oy + 47)
     pdf.set_font("Arial", 'B', 7)
     pdf.cell(18, 4, "ADDRESS:", 0)
     pdf.set_font("Arial", '', 6)
-    pdf.set_xy(ox + 22, oy + 48)
+    pdf.set_xy(ox + 22, oy + 47)
     pdf.multi_cell(40, 3, student.get('address', 'N/A'))
 
     return pdf.output(dest='S').encode('latin-1')
 
-# --- 3. LOGIN SYSTEM ---
+# --- 3. ACCESS CONTROL ---
 if 'auth' not in st.session_state:
     st.session_state.update({'auth': False, 'role': None, 'user': None})
 
 if not st.session_state.auth:
     st.title("🔐 OPI Master Portal")
-    uid = st.text_input("Username / Roll No")
+    uid = st.text_input("User ID / Roll No")
     pwd = st.text_input("Password", type="password")
-    if st.button("Access System"):
+    if st.button("Enter System"):
         if uid == "admin" and pwd == "opi2026":
             st.session_state.update({'auth': True, 'role': 'Admin'})
             st.rerun()
@@ -95,77 +99,74 @@ if not st.session_state.auth:
             if res.data:
                 st.session_state.update({'auth': True, 'role': 'Student', 'user': res.data[0]})
                 st.rerun()
-            else: st.error("Access Denied: Invalid Credentials")
+            else: st.error("Invalid Login Credentials")
 else:
-    if st.sidebar.button("Log Out"):
+    if st.sidebar.button("Logout"):
         st.session_state.auth = False
         st.rerun()
 
-    # --- ADMIN VIEW ---
+    # --- ADMIN SIDE ---
     if st.session_state.role == "Admin":
-        st.title("👨‍🏫 OPI Admin Control")
-        t1, t2 = st.tabs(["Register Student", "Master Records"])
+        st.title("👨‍🏫 Administrator Dashboard")
+        t1, t2 = st.tabs(["Enroll Student", "Master Database"])
         
         with t1:
-            with st.form("enroll", clear_on_submit=True):
+            with st.form("enroll_student", clear_on_submit=True):
                 c1, c2 = st.columns(2)
                 with c1:
                     r = st.text_input("Roll Number")
                     n = st.text_input("Full Name")
-                    crs = st.selectbox("Course", ["DMLT", "Radiology", "ECG Technician"])
+                    crs = st.selectbox("Course", ["DMLT", "Radiology", "ECG Technician", "Nursing"])
                     ph = st.text_input("Phone Number")
                 with c2:
                     bg = st.selectbox("Blood Group", ["A+", "B+", "O+", "AB+", "A-", "B-", "O-", "AB-"])
-                    sess = st.text_input("Academic Session")
-                    p_set = st.text_input("Set Login Password")
+                    sess = st.text_input("Session")
+                    p_set = st.text_input("Set Password")
                 
-                addr = st.text_area("Permanent Address")
-                up_file = st.file_uploader("Upload Student Photo (JPG/PNG)", type=['jpg', 'png', 'jpeg'])
+                addr = st.text_area("Address")
+                up_file = st.file_uploader("Choose Student Photo", type=['jpg', 'png', 'jpeg'])
                 
-                if st.form_submit_button("Save Student to Cloud"):
-                    img_b64 = ""
+                if st.form_submit_button("Save Record"):
+                    img_str = ""
                     if up_file:
-                        img_b64 = f"data:image/png;base64,{base64.b64encode(up_file.getvalue()).decode()}"
+                        img_str = f"data:image/png;base64,{base64.b64encode(up_file.getvalue()).decode()}"
                     
                     payload = {
                         "roll_no": r, "name": n, "course": crs, "phone": ph,
                         "blood_group": bg, "session": sess, "address": addr,
-                        "password": p_set, "photo_url": img_b64
+                        "password": p_set, "photo_url": img_str
                     }
                     supabase.table("students").insert(payload).execute()
-                    st.success(f"Record created for {n}")
+                    st.success(f"Success! {n} is now in the database.")
 
         with t2:
-            st.subheader("📋 Complete Student Database")
+            st.subheader("📋 Institutional Records")
             records = supabase.table("students").select("*").execute()
             if records.data:
                 st.dataframe(records.data)
-            else: st.info("Database is currently empty.")
+            else: st.info("No students found.")
 
-    # --- STUDENT VIEW ---
+    # --- STUDENT SIDE ---
     elif st.session_state.role == "Student":
         s = st.session_state.user
-        st.title(f"👋 Student Dashboard: {s['name']}")
+        st.title(f"👋 Student Portal: {s['name']}")
         
-        col_img, col_data = st.columns([1, 2])
+        col_img, col_info = st.columns([1, 2])
         with col_img:
             if s.get('photo_url') and len(s['photo_url']) > 100:
-                st.image(s['photo_url'], width=200)
-            else: st.warning("No photo found in records.")
+                st.image(s['photo_url'], width=180)
+            else: st.info("Photo not available in records.")
             
-        with col_data:
-            st.subheader("Your Profile Information")
+        with col_info:
+            st.subheader("Academic Details")
             st.write(f"**Roll No:** {s['roll_no']}")
             st.write(f"**Course:** {s['course']}")
-            st.write(f"**Session:** {s['session']}")
-            st.write(f"**Blood Group:** {s['blood_group']}")
-            st.info(f"📍 **Address:** {s.get('address', 'N/A')}")
+            st.write(f"**Address:** {s.get('address', 'N/A')}")
             
-            # PDF Download
-            pdf_data = create_id_card(s)
+            pdf_bytes = create_id_card(s)
             st.download_button(
-                label="🪪 Download Official ID Card (PDF)",
-                data=pdf_data,
+                label="🪪 Download ID Card (PDF)",
+                data=pdf_bytes,
                 file_name=f"OPI_ID_{s['roll_no']}.pdf",
                 mime="application/pdf"
             )
